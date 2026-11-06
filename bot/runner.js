@@ -13,11 +13,8 @@ let file = {};
 try { file = JSON.parse(fs.readFileSync(path.join(DIR, 'config.json'), 'utf8')); } catch {}
 
 const DEFAULT_SCRIPTS = [
-  'holopocket-vendre-doublons.user.js',
   'holopocket-auto-booster.user.js',
-  'holopocket-recyclage.user.js',
   'holopocket-echanges.user.js',
-  'holopocket-achat-revente.user.js',
 ];
 const TOGGLE_OF = {
   'holopocket-vendre-doublons.user.js': 'hp-sell-auto-on',

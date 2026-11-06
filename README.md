@@ -27,4 +27,5 @@ Chaque script contient `@updateURL` : Tampermonkey récupère tout seul les nouv
 
 - `scripts/` : scripts prêts à installer (générés, ne pas modifier à la main)
 - `src/` : sources ; `kit.js` est l'interface commune injectée dans chaque script
+- `bot/` : faire tourner les scripts 24 h/24 sur un serveur (voir `bot/README.md`)
 - `python3 src/build.py` : régénère `scripts/` et vérifie la syntaxe (`node --check`)

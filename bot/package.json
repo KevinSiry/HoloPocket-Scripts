@@ -1,0 +1,9 @@
+{
+  "name": "holopocket-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Fait tourner les scripts HoloPocket 24 h/24 dans un Chromium sans écran (VPS)",
+  "main": "runner.js",
+  "scripts": { "start": "node runner.js" },
+  "dependencies": { "playwright": "1.48.2" }
+}

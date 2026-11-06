@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Achat-revente intelligent
 // @namespace    kevin.holopocket
-// @version      1.4
+// @version      1.5
 // @description  Mode auto : enchérit sur les ventes qui se terminent dans moins de 5 min quand la carte part bien en dessous de sa valeur réelle, garde les cartes qui manquaient à ta collection et remet les autres en vente avec une marge.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -167,9 +167,25 @@
   }
 
   // ───────── 2) Remise en vente des cartes achetées ─────────
+  // Exemplaires promis dans une proposition d'échange en attente (site + envois récents pas encore affichés par le site) :
+  // on n'y touche pas, sinon la vente et l'échange partiraient avec le même exemplaire. null = illisible → ne rien vendre.
+  async function promisedIds() {
+    const ids = new Set();
+    try {
+      const sent = await api('GET', '/trades/sent');
+      for (const t of Array.isArray(sent) ? sent : (sent.entries || [])) {
+        if (t.status !== 'pending') continue;
+        for (const x of t.offered || []) if (x.userCardId) ids.add(x.userCardId);
+      }
+    } catch { return null; }
+    try { const now = Date.now(); for (const e of JSON.parse(localStorage.getItem('hp-trade-promised') || '[]')) if (now - e.at < 15 * 60000) ids.add(e.id); } catch {}
+    return ids;
+  }
   async function relist() {
     const todo = S.holdings.filter((h) => !h.auctionId);
     if (!todo.length) return;
+    const promised = await promisedIds();
+    if (!promised) return; // échanges en attente illisibles : on ne vend rien ce tour-ci
     let counts;
     try { counts = await api('GET', '/market/counts'); } catch { return; }
     let free = (counts.maxSelling ?? 0) - (counts.selling ?? 0);
@@ -177,9 +193,14 @@
       if (free <= 0) break;
       let m;
       try { m = (await api('GET', `/cards/${encodeURIComponent(h.cardId)}`)).mine || {}; } catch { continue; }
-      const { copies, listed, ids } = version(m, h.reverse);
-      // La carte n'est plus en double (échangée, recyclée…) → on la garde
-      if (copies - listed <= 1) { S.holdings.splice(S.holdings.indexOf(h), 1); note(`${h.name} : plus de doublon, gardée`); continue; }
+      const { copies, listed, ids: allIds } = version(m, h.reverse);
+      const ids = allIds.filter((id) => !promised.has(id)); // pas les exemplaires promis dans un échange en attente
+      const promisedN = allIds.length - ids.length;
+      if (copies - listed - promisedN <= 1) {
+        if (copies - listed > 1) continue; // un exemplaire est promis dans un échange : on attend sa réponse
+        // La carte n'est plus en double (échangée, recyclée…) → on la garde
+        S.holdings.splice(S.holdings.indexOf(h), 1); note(`${h.name} : plus de doublon, gardée`); continue;
+      }
       if (!ids.length) continue; // pas encore disponible : au prochain passage
       const info = await marketInfo(h.cardId, h.reverse);
       const floorMargin = Math.ceil((h.cost * (1 + CONFIG.RESALE_MARGIN)) / (1 - CONFIG.TAX));

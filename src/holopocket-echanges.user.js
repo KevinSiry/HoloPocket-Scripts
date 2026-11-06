@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.9
+// @version      3.10
 // @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord, avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -76,6 +76,10 @@
   };
 
   // ───────── Exemplaires réellement libres ─────────
+  // Exemplaires promis dans un échange tout juste envoyé (le site met un moment à l'afficher) : partagé avec les scripts de vente
+  const PROMISED_KEY = 'hp-trade-promised', PROMISED_TTL = 15 * 60000;
+  const localPromised = () => { try { const now = Date.now(); return JSON.parse(localStorage.getItem(PROMISED_KEY) || '[]').filter((e) => now - e.at < PROMISED_TTL).map((e) => e.id); } catch { return []; } };
+  const savePromised = (ids) => { try { const now = Date.now(); const keep = JSON.parse(localStorage.getItem(PROMISED_KEY) || '[]').filter((e) => now - e.at < PROMISED_TTL); localStorage.setItem(PROMISED_KEY, JSON.stringify([...keep, ...ids.map((id) => ({ id, at: now }))])); } catch {} };
   // Une carte retirée d'une proposition (dernier exemplaire, en vente…) n'est plus proposée pendant 30 min
   const BLOCK_MS = 30 * 60000;
   const blockedGive = new Map();
@@ -90,9 +94,11 @@
     const owned = rev ? (m.reverseCopies || 0) : (m.copies || 0) - (m.reverseCopies || 0);
     const listed = rev ? (m.listedReverse || 0) : (m.listed || 0);
     const locked = !!(m.locked && (rev ? m.locked.reverse : m.locked.normal));
-    const promised = (log && log.offered.get(key(c))) || 0;
-    const spare = locked ? 0 : Math.max(0, Math.min(owned - listed - promised - keep, ids.length - promised));
-    return { spare, ids, promised };
+    const pset = (log && log.promisedIds) || new Set();
+    const free = ids.filter((id) => !pset.has(id));      // ni en vente, ni promis dans un échange en attente
+    const promised = ids.length - free.length;
+    const spare = locked ? 0 : Math.max(0, Math.min(owned - listed - promised - keep, free.length));
+    return { spare, ids: free, promised };
   }
 
   // ───────── Anti-spam ─────────
@@ -106,6 +112,7 @@
   async function tradeLog(me) {
     const asked = new Set(), offered = new Map();
     const pendingTo = new Set();
+    const promisedIds = new Set(); // exemplaires (userCardId) promis dans un échange en attente
     let openSent = 0;
     const lastByPlayer = new Map(); // joueur → { at, declined, accepted }
     const sendTimes = [];
@@ -123,7 +130,7 @@
     for (const t of sent) {
       if (t.from && t.from !== me) continue;
       const at = Date.parse(t.createdAt) || Date.now();
-      if (t.status === 'pending') { pendingTo.add(t.to); openSent++; }
+      if (t.status === 'pending') { pendingTo.add(t.to); openSent++; for (const x of t.offered || []) if (x.userCardId) promisedIds.add(x.userCardId); }
       note(t.to, at, false);
       sendTimes.push(at);
       for (const x of t.requested || []) { const c = x.card || x; if (c && c.id) asked.add(`${c.id}|${!!(x.reverse ?? c.reverse)}`); }
@@ -150,7 +157,8 @@
       note(e.to, e.at, false); sendTimes.push(e.at);
     }
     openTrades = openSent;
-    return { asked, offered, pendingTo, openSent, lastByPlayer, sendTimes: [...new Set(sendTimes)].sort((a, b) => a - b) };
+    for (const id of localPromised()) promisedIds.add(id);
+    return { asked, offered, pendingTo, openSent, lastByPlayer, promisedIds, sendTimes: [...new Set(sendTimes)].sort((a, b) => a - b) };
   }
 
   // Annule les propositions envoyées restées sans réponse depuis plus de CANCEL_AFTER_H
@@ -488,7 +496,7 @@
         blockedGive.set(key(x.give), Date.now());
         throw new Error(`${x.give.name} : dernier exemplaire ou déjà en vente, échange non envoyé`);
       }
-      if (!info.ids.includes(x.giveId)) x.giveId = info.ids[Math.min(info.promised, info.ids.length - 1)];
+      if (!info.ids.includes(x.giveId)) x.giveId = info.ids[0];
       await sleep(CONFIG.DELAY / 2);
     }
     await api('POST', '/trades', {
@@ -498,6 +506,7 @@
       offeredCoins: 0, // jamais de pièces de ton côté
       requestedCoins: Math.max(0, Math.round(prop.coins || 0)),
     });
+    savePromised(prop.pairs.map((x) => x.giveId)); // les scripts de vente n'y touchent plus
     writeLocal([...readLocal(), { to: prop.partner, at: Date.now() }]);
   }
   // ───────── Échange prioritaire : don à sens unique vers HP_PRIORITY_TARGET ─────────
@@ -529,7 +538,7 @@
         if (isBlocked(key(g))) continue;
         checked++;
         const info = await freeInfo(g, log, 0); // fiche de la carte : en vente ou déjà promise → ignorée (le dernier exemplaire peut partir)
-        if (info.spare >= 1) ids.push(info.ids[Math.min(info.promised, info.ids.length - 1)]);
+        if (info.spare >= 1) ids.push(info.ids[0]);
         await sleep(CONFIG.DELAY / 2);
       }
       if (!ids.length) return false;
@@ -540,6 +549,7 @@
         offeredCoins: 0,
         requestedCoins: 0,
       });
+      savePromised(ids); // les scripts de vente n'y touchent plus
       writeLocal([...readLocal(), { to: target, at: Date.now() }]);
       if (openTrades != null) openTrades++;
       lastPriorityErr = '';

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Recyclage intelligent des doublons
 // @namespace    kevin.holopocket
-// @version      1.1
+// @version      1.2
 // @description  Recycle uniquement les doublons qui ne valent pas une mise aux enchères (vente nette après taxe pas assez supérieure à la valeur de recyclage). Garde toujours tes exemplaires et ignore les cartes verrouillées, favorites, recherchées, en vente, en échange, ou liées à un objectif ou une médaille.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -69,6 +69,7 @@
         for (const x of t.offered || []) if (x.userCardId) ids.add(x.userCardId);
       }
     } catch {}
+    try { const now = Date.now(); for (const e of JSON.parse(localStorage.getItem('hp-trade-promised') || '[]')) if (now - e.at < 15 * 60000) ids.add(e.id); } catch {}
     return ids;
   }
 

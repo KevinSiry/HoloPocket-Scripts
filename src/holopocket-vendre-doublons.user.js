@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Vendre mes doublons
 // @namespace    kevin.holopocket
-// @version      4.2
+// @version      4.3
 // @description  Marché : met en vente les doublons (prix conseillé, les plus chers d'abord), à la demande ou en mode auto qui remplit les slots dès qu'une place se libère.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -46,7 +46,7 @@
   }
 
   // Exemplaires vendables en gardant toujours au moins 1 exemplaire de chaque version
-  function candidates(entries) {
+  function candidates(entries, promised) {
     const list = [];
     for (const e of entries) {
       const versions = [
@@ -54,9 +54,12 @@
         { reverse: true, ids: e.availableReverseIds || [], owned: e.owned?.reverse ?? 0, value: e.reverseMarketValue },
       ];
       for (const v of versions) {
-        // Un seul exemplaire par version : jamais deux ventes simultanées de la même carte
-        if (v.ids.length && v.owned - 1 >= 1) {
-          list.push({ userCardId: v.ids[0], cardId: e.id, name: e.name, reverse: v.reverse, value: v.value ?? e.estimate ?? 0 });
+        // Un seul exemplaire par version : jamais deux ventes simultanées de la même carte.
+        // Les exemplaires promis dans un échange en attente ne comptent pas : ils partiront si l'échange est accepté.
+        const free = v.ids.filter((id) => !promised.has(id));
+        const promisedN = v.ids.length - free.length;
+        if (free.length && v.owned - promisedN - 1 >= 1) {
+          list.push({ userCardId: free[0], cardId: e.id, name: e.name, reverse: v.reverse, value: v.value ?? e.estimate ?? 0 });
         }
       }
     }
@@ -87,6 +90,20 @@
   // Cartes (et versions) déjà en vente : on ne les remet pas en vente une deuxième fois
   // Cartes achetées par le script Achat-revente : il s'occupe lui-même de leur revente
   const flipReserved = () => { try { return new Set(JSON.parse(localStorage.getItem('hp-flip-reserved') || '[]')); } catch { return new Set(); } };
+  // Exemplaires promis dans une proposition d'échange en attente (site + envois récents pas encore affichés par le site) :
+  // on n'y touche pas, sinon la vente et l'échange partiraient avec le même exemplaire. null = illisible → ne rien vendre.
+  async function promisedIds() {
+    const ids = new Set();
+    try {
+      const sent = await api('GET', '/trades/sent');
+      for (const t of Array.isArray(sent) ? sent : (sent.entries || [])) {
+        if (t.status !== 'pending') continue;
+        for (const x of t.offered || []) if (x.userCardId) ids.add(x.userCardId);
+      }
+    } catch { return null; }
+    try { const now = Date.now(); for (const e of JSON.parse(localStorage.getItem('hp-trade-promised') || '[]')) if (now - e.at < 15 * 60000) ids.add(e.id); } catch {}
+    return ids;
+  }
   async function onSaleKeys() {
     const keys = new Set();
     try {
@@ -102,7 +119,9 @@
     const done = [], failed = [];
     const onSale = await onSaleKeys();
     const reserved = flipReserved();
-    const list = candidates(await fetchDuplicates()).filter((c) => !onSale.has(`${c.cardId}|${!!c.reverse}`) && !reserved.has(`${c.cardId}|${!!c.reverse}`));
+    const promised = await promisedIds();
+    if (!promised) throw new Error('échanges en attente illisibles : vente reportée');
+    const list = candidates(await fetchDuplicates(), promised).filter((c) => !onSale.has(`${c.cardId}|${!!c.reverse}`) && !reserved.has(`${c.cardId}|${!!c.reverse}`));
     for (const c of list) {
       if (done.length >= max) break;
       const k = `${c.cardId}|${!!c.reverse}`;

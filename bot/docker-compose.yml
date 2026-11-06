@@ -1,0 +1,13 @@
+services:
+  holopocket-bot:
+    build: .
+    container_name: holopocket-bot
+    env_file: .env
+    restart: unless-stopped
+    init: true
+    shm_size: "1gb"            # Chromium a besoin de mémoire partagée
+    volumes:
+      - ./data:/app/profile    # mémoire des scripts conservée entre deux redémarrages
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }

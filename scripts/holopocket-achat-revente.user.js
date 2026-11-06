@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Achat-revente intelligent
 // @namespace    kevin.holopocket
-// @version      1.3
+// @version      1.4
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-revente.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-revente.user.js
 // @description  Mode auto : enchérit sur les ventes qui se terminent dans moins de 5 min quand la carte part bien en dessous de sa valeur réelle, garde les cartes qui manquaient à ta collection et remet les autres en vente avec une marge.
@@ -20,7 +20,7 @@
     MIN_MARGIN: 0.30,        // marge nette minimale visée : revente (après taxe) ≥ prix d'achat + 30 %
     MIN_PROFIT: 15,          // et au moins 15 pièces de bénéfice net par carte
     MIN_SALES: 5,            // la carte doit s'être vendue au moins 5 fois sur 7 jours (prix fiable, revente facile)
-    RESERVE: 500,            // pièces jamais engagées
+    RESERVE: 100,            // pièces jamais engagées
     MAX_ENGAGED: 1500,       // total maximum engagé en même temps dans des enchères
     MAX_BIDS_PER_PASS: 10,   // nouvelles enchères au plus par passage
     // Revente

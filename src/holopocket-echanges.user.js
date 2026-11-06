@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.7
-// @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord, avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Mode automatique possible.
+// @version      3.8
+// @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord, avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas). Mode automatique possible.
 // @match        https://holopocket.fr/*
 // @grant        none
 // @run-at       document-idle
@@ -36,6 +36,7 @@
     SCAN_COOLDOWN_H: 24,  // un joueur scanné sans résultat n'est pas rescanné avant 24 h
     MAX_PROPOSALS: 8,    // propositions préparées par recherche
     FAVORITES_ONLY: false,   // false : toutes les séries (les favoris restent prioritaires) · true : séries en favori uniquement
+    PRIORITY_MAX_CARDS: 10, // échange prioritaire : cartes données par envoi (10 = limite du site)
     MAX_OPEN_TRADES: 20, // limite du site : échanges en cours (propositions envoyées en attente)
     // Mode automatique
     AUTO_INTERVAL_MIN: 1,    // un passage toutes les minutes au plus (seulement s'il reste des places)
@@ -50,6 +51,9 @@
   // Joueurs à ne jamais solliciter (ex. ton autre compte) : localStorage 'hp-excluded-players' = ["pseudo", …]
   const excludedPlayers = () => { try { return new Set(JSON.parse(localStorage.getItem('hp-excluded-players') || '[]').map((x) => String(x).toLowerCase())); } catch { return new Set(); } };
   const isExcluded = (u) => !!u && excludedPlayers().has(String(u).toLowerCase());
+  // Joueur prioritaire : localStorage 'hp-priority-target' = "pseudo" (HP_PRIORITY_TARGET du bot)
+  const priorityTarget = () => { try { return (localStorage.getItem('hp-priority-target') || '').trim(); } catch { return ''; } };
+  const isPriority = (u) => { const t = priorityTarget(); return !!t && !!u && String(u).toLowerCase() === t.toLowerCase(); };
   async function api(method, path, body) {
     const res = await fetch(`/api${path}`, {
       method, credentials: 'same-origin',
@@ -292,6 +296,7 @@
       ...(board.requests || []).map((r) => r.player && r.player.username),
     ])].filter((u) => {
       if (!u || u === me || isExcluded(u)) return false; // jamais d'échange avec un joueur exclu
+      if (isPriority(u)) return false; // la cible prioritaire a son propre envoi (priorityStep)
       if (playerBlocked(u, log)) { paused++; return false; } // déjà sollicité / en attente / a refusé
       if (scannedMem[u]) { alreadyScanned++; return false; } // déjà scanné récemment sans résultat
       return true;
@@ -464,6 +469,57 @@
     });
     writeLocal([...readLocal(), { to: prop.partner, at: Date.now() }]);
   }
+  // ───────── Échange prioritaire : don à sens unique vers HP_PRIORITY_TARGET ─────────
+  // Envoie les cartes que la cible n'a pas (les plus chères d'abord), même celles en un seul exemplaire,
+  // sans rien demander en retour. Hors classeur et hors cartes réservées à la revente.
+  // Passe avant la recherche normale ; aucune pause après acceptation ou refus, mais un seul échange ouvert à la fois.
+  let lastPriorityErr = '', priorityWarned = false;
+  async function priorityStep(log) {
+    const target = priorityTarget();
+    if (!target || !myName || target.toLowerCase() === myName.toLowerCase()) return false;
+    if (isExcluded(target) && !priorityWarned) {
+      priorityWarned = true;
+      UI.toast(`<b>Échange prioritaire</b> : ${esc(target)} est aussi dans les joueurs exclus, la priorité l'emporte`, { kind: 'info', ms: 10000 });
+    }
+    if (log.pendingTo.has(target)) return false;                // un échange est déjà en attente avec lui
+    if (log.openSent >= CONFIG.MAX_OPEN_TRADES) return false;   // aucune place libre
+    if (!sendGate(log).ok) return false;
+    try {
+      const acc = await api('GET', `/users/${encodeURIComponent(target)}/trade-access`);
+      if (acc.access !== 'open') return false;
+      const flipRes = flipReserved();
+      const give = list(await api('GET', `/users/${encodeURIComponent(myName)}/cards?notOwnedBy=${encodeURIComponent(target)}`)) // toutes tes cartes, pas seulement les doublons
+        .filter((c) => !inBinder(c) && !flipRes.has(key(c)) && (c.userCardIds || []).length)
+        .sort((a, b) => val(b) - val(a));
+      const ids = [];
+      for (const g of give) {
+        const used = log.offered.get(key(g)) || 0;      // exemplaires déjà engagés dans un autre échange ouvert
+        if (used >= g.userCardIds.length) continue;      // plus aucun exemplaire libre
+        // une seule copie par carte suffit : la cible n'en a aucune
+        ids.push(g.userCardIds[used]);
+        if (ids.length >= CONFIG.PRIORITY_MAX_CARDS) break;
+      }
+      if (!ids.length) return false;
+      await api('POST', '/trades', {
+        toUsername: target,
+        offeredUserCardIds: ids,
+        requestedUserCardIds: [],
+        offeredCoins: 0,
+        requestedCoins: 0,
+      });
+      writeLocal([...readLocal(), { to: target, at: Date.now() }]);
+      if (openTrades != null) openTrades++;
+      lastPriorityErr = '';
+      UI.toast(`<b>Échange prioritaire</b> : ${ids.length} carte(s) proposée(s) à ${esc(target)}`, { kind: 'success', ms: 12000 });
+      return true;
+    } catch (e) {
+      if (e.message !== lastPriorityErr) { // une seule alerte par message, pas une par minute
+        lastPriorityErr = e.message;
+        UI.toast(`Échange prioritaire (${esc(target)}) : ${esc(e.message)}`, { kind: 'error', ms: 12000 });
+      }
+      return false;
+    }
+  }
   const fmtWait = (ms) => {
     const s = Math.ceil(ms / 1000);
     if (s < 60) return `${s} s`;
@@ -586,7 +642,9 @@
       if (!myName) myName = (await api('GET', '/me')).me.username;
       await cancelStale(true); // libère d'abord les places bloquées par des propositions trop anciennes
       for (let round = 0; round < CONFIG.AUTO_MAX_ROUNDS && autoOn; round++) {
-        const log = await tradeLog(myName);
+        let log = await tradeLog(myName);
+        // Échange prioritaire d'abord (une fois par passage) : il prend une place avant la recherche normale
+        if (round === 0 && await priorityStep(log)) log = await tradeLog(myName);
         const room = CONFIG.MAX_OPEN_TRADES - log.openSent;
         if (room <= 0) { full = true; break; }
         autoStatus = `Recherche (tour ${round + 1}) · ${room} place(s) libre(s)`; paint();

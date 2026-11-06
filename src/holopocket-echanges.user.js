@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.8
-// @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord, avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas). Mode automatique possible.
+// @version      3.9
+// @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord, avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
 // @match        https://holopocket.fr/*
 // @grant        none
 // @run-at       document-idle
@@ -37,6 +37,7 @@
     MAX_PROPOSALS: 8,    // propositions préparées par recherche
     FAVORITES_ONLY: false,   // false : toutes les séries (les favoris restent prioritaires) · true : séries en favori uniquement
     PRIORITY_MAX_CARDS: 10, // échange prioritaire : cartes données par envoi (10 = limite du site)
+    PRIORITY_MAX_CHECK: 40, // …et fiches de cartes vérifiées au plus par passage
     MAX_OPEN_TRADES: 20, // limite du site : échanges en cours (propositions envoyées en attente)
     // Mode automatique
     AUTO_INTERVAL_MIN: 1,    // un passage toutes les minutes au plus (seulement s'il reste des places)
@@ -73,6 +74,26 @@
     if (Array.isArray(k)) return k.length > 0;
     return Object.values(k).some((v) => Array.isArray(v) ? v.length : v);
   };
+
+  // ───────── Exemplaires réellement libres ─────────
+  // Une carte retirée d'une proposition (dernier exemplaire, en vente…) n'est plus proposée pendant 30 min
+  const BLOCK_MS = 30 * 60000;
+  const blockedGive = new Map();
+  const isBlocked = (k) => { const t = blockedGive.get(k); if (!t) return false; if (Date.now() - t > BLOCK_MS) { blockedGive.delete(k); return false; } return true; };
+  // Lit la fiche de la carte (comme Recyclage et Achat-revente) : exemplaires possédés, en vente, déjà promis dans un échange.
+  // spare = exemplaires qu'on peut donner en gardant `keep` exemplaire(s) (1 = toujours le dernier, 0 = échange prioritaire) ; ids = exemplaires non mis en vente
+  async function freeInfo(c, log, keep = 1) {
+    const m = (await api('GET', `/cards/${encodeURIComponent(c.id)}`)).mine || {};
+    const rev = !!c.reverse;
+    const revIds = new Set(m.availableReverseIds || []);
+    const ids = rev ? (m.availableReverseIds || []) : (m.availableIds || []).filter((id) => !revIds.has(id));
+    const owned = rev ? (m.reverseCopies || 0) : (m.copies || 0) - (m.reverseCopies || 0);
+    const listed = rev ? (m.listedReverse || 0) : (m.listed || 0);
+    const locked = !!(m.locked && (rev ? m.locked.reverse : m.locked.normal));
+    const promised = (log && log.offered.get(key(c))) || 0;
+    const spare = locked ? 0 : Math.max(0, Math.min(owned - listed - promised - keep, ids.length - promised));
+    return { spare, ids, promised };
+  }
 
   // ───────── Anti-spam ─────────
   // Journal local des envois (complète l'historique du site, qui peut avoir un léger retard)
@@ -339,7 +360,7 @@
         usedHere.add(k); askedHere.add(key(a));
         pairs.push({ ask: a, askId: a.userCardIds[0], give: g, giveId: g.userCardIds[giveUsed.get(k) || 0], wished: !!(c.wish && c.wish.has(k)), coin: sc.coin });
       };
-      const giveFree = (g) => !usedHere.has(key(g)) && (giveUsed.get(key(g)) || 0) < spareOf(g);
+      const giveFree = (g) => !usedHere.has(key(g)) && !isBlocked(key(g)) && (giveUsed.get(key(g)) || 0) < spareOf(g);
       const askFree = (a) => !askedHere.has(key(a)) && !wantedTaken.has(key(a));
       // a) Les doublons qu'il a mis dans sa liste de souhaits passent en premier
       if (c.wish && c.wish.size) {
@@ -460,6 +481,16 @@
     if (blocked) throw new Error(`${prop.partner} : ${blocked}`);
     const gate = sendGate(log);
     if (!gate.ok) throw new Error(`${gate.reason} — réessaie dans ${fmtWait(gate.wait)}`);
+    // Dernière vérification sur la fiche de chaque carte donnée : jamais le dernier exemplaire, jamais une carte en vente
+    for (const x of prop.pairs) {
+      const info = await freeInfo(x.give, log);
+      if (info.spare < 1) {
+        blockedGive.set(key(x.give), Date.now());
+        throw new Error(`${x.give.name} : dernier exemplaire ou déjà en vente, échange non envoyé`);
+      }
+      if (!info.ids.includes(x.giveId)) x.giveId = info.ids[Math.min(info.promised, info.ids.length - 1)];
+      await sleep(CONFIG.DELAY / 2);
+    }
     await api('POST', '/trades', {
       toUsername: prop.partner,
       offeredUserCardIds: prop.pairs.map((x) => x.giveId),
@@ -470,8 +501,8 @@
     writeLocal([...readLocal(), { to: prop.partner, at: Date.now() }]);
   }
   // ───────── Échange prioritaire : don à sens unique vers HP_PRIORITY_TARGET ─────────
-  // Envoie les cartes que la cible n'a pas (les plus chères d'abord), même celles en un seul exemplaire,
-  // sans rien demander en retour. Hors classeur et hors cartes réservées à la revente.
+  // Envoie les cartes que la cible n'a pas (les plus chères d'abord), sans rien demander en retour.
+  // Seul cas où le dernier exemplaire peut partir. Jamais une carte en vente ni déjà promise, hors classeur et hors cartes réservées à la revente.
   // Passe avant la recherche normale ; aucune pause après acceptation ou refus, mais un seul échange ouvert à la fois.
   let lastPriorityErr = '', priorityWarned = false;
   async function priorityStep(log) {
@@ -492,12 +523,14 @@
         .filter((c) => !inBinder(c) && !flipRes.has(key(c)) && (c.userCardIds || []).length)
         .sort((a, b) => val(b) - val(a));
       const ids = [];
+      let checked = 0;
       for (const g of give) {
-        const used = log.offered.get(key(g)) || 0;      // exemplaires déjà engagés dans un autre échange ouvert
-        if (used >= g.userCardIds.length) continue;      // plus aucun exemplaire libre
-        // une seule copie par carte suffit : la cible n'en a aucune
-        ids.push(g.userCardIds[used]);
-        if (ids.length >= CONFIG.PRIORITY_MAX_CARDS) break;
+        if (ids.length >= CONFIG.PRIORITY_MAX_CARDS || checked >= CONFIG.PRIORITY_MAX_CHECK) break;
+        if (isBlocked(key(g))) continue;
+        checked++;
+        const info = await freeInfo(g, log, 0); // fiche de la carte : en vente ou déjà promise → ignorée (le dernier exemplaire peut partir)
+        if (info.spare >= 1) ids.push(info.ids[Math.min(info.promised, info.ids.length - 1)]);
+        await sleep(CONFIG.DELAY / 2);
       }
       if (!ids.length) return false;
       await api('POST', '/trades', {

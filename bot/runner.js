@@ -75,6 +75,7 @@ function parseCookie(header) {
   }
   const ctx = await chromium.launchPersistentContext(path.join(DIR, 'profile'), {
     headless: true, viewport: { width: 1400, height: 900 }, locale: 'fr-FR', timezoneId: 'Europe/Paris',
+    bypassCSP: true, // le site interdit les scripts ajoutés à la page (CSP) : Tampermonkey contourne cette règle, on fait pareil
     args: ['--disable-dev-shm-usage'],
   });
   if (cfg.cookie) await ctx.addCookies(parseCookie(cfg.cookie));
@@ -168,4 +169,8 @@ function parseCookie(header) {
   const stop = async () => { log('Arrêt demandé'); await ctx.close().catch(() => {}); process.exit(0); };
   process.on('SIGTERM', stop);
   process.on('SIGINT', stop);
-})().catch((e) => { log('Arrêt :', e.message); process.exit(1); });
+})().catch(async (e) => {
+  log('Arrêt :', e.message, '· nouvel essai dans 2 min');
+  await sleep(2 * 60000); // évite de se reconnecter en boucle toutes les 5 s
+  process.exit(1);
+});

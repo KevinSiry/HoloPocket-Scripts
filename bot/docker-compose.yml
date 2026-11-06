@@ -1,13 +1,25 @@
+# Un service par compte : chacun a ses identifiants (.env.<compte>) et sa propre mémoire (data/<compte>).
+x-bot: &bot
+  build: .
+  image: holopocket-bot
+  restart: unless-stopped
+  init: true
+  shm_size: "1gb"            # Chromium a besoin de mémoire partagée
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
 services:
-  holopocket-bot:
-    build: .
-    container_name: holopocket-bot
-    env_file: .env
-    restart: unless-stopped
-    init: true
-    shm_size: "1gb"            # Chromium a besoin de mémoire partagée
+  compte1:
+    <<: *bot
+    container_name: holopocket-compte1
+    env_file: .env.compte1
     volumes:
-      - ./data:/app/profile    # mémoire des scripts conservée entre deux redémarrages
-    logging:
-      driver: json-file
-      options: { max-size: "10m", max-file: "3" }
+      - ./data/compte1:/app/profile
+
+  compte2:
+    <<: *bot
+    container_name: holopocket-compte2
+    env_file: .env.compte2
+    volumes:
+      - ./data/compte2:/app/profile

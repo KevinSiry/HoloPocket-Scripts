@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.6
+// @version      3.7
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord, avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Mode automatique possible.
@@ -49,6 +49,9 @@
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // Cartes achetées par le script Achat-revente : il s'occupe lui-même de leur revente
   const flipReserved = () => { try { return new Set(JSON.parse(localStorage.getItem('hp-flip-reserved') || '[]')); } catch { return new Set(); } };
+  // Joueurs à ne jamais solliciter (ex. ton autre compte) : localStorage 'hp-excluded-players' = ["pseudo", …]
+  const excludedPlayers = () => { try { return new Set(JSON.parse(localStorage.getItem('hp-excluded-players') || '[]').map((x) => String(x).toLowerCase())); } catch { return new Set(); } };
+  const isExcluded = (u) => !!u && excludedPlayers().has(String(u).toLowerCase());
   async function api(method, path, body) {
     const res = await fetch(`/api${path}`, {
       method, credentials: 'same-origin',
@@ -290,7 +293,7 @@
       ...((team.team && team.team.members) || []).map((m) => m.username),
       ...(board.requests || []).map((r) => r.player && r.player.username),
     ])].filter((u) => {
-      if (!u || u === me) return false;
+      if (!u || u === me || isExcluded(u)) return false; // jamais d'échange avec un joueur exclu
       if (playerBlocked(u, log)) { paused++; return false; } // déjà sollicité / en attente / a refusé
       if (scannedMem[u]) { alreadyScanned++; return false; } // déjà scanné récemment sans résultat
       return true;

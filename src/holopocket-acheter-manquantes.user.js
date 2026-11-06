@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Enchérir sur mes cartes manquantes
 // @namespace    kevin.holopocket
-// @version      2.0
+// @version      2.1
 // @description  Bouton sur le Marché : enchérit (mise minimale) sur les cartes manquantes des séries en favori, seulement si l'enchère ne dépasse pas le prix habituel.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -25,6 +25,9 @@
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+  // Joueurs à ne jamais solliciter (ex. ton autre compte) : localStorage 'hp-excluded-players' = ["pseudo", …]
+  const excludedPlayers = () => { try { return new Set(JSON.parse(localStorage.getItem('hp-excluded-players') || '[]').map((x) => String(x).toLowerCase())); } catch { return new Set(); } };
+  const isExcluded = (u) => !!u && excludedPlayers().has(String(u).toLowerCase());
   async function api(method, path, body) {
     const res = await fetch(`/api${path}`, {
       method,
@@ -102,7 +105,7 @@
       const ok = list
         .filter((a) => {
           const end = new Date(a.endsAt).getTime();
-          return a.status === 'active' && !a.isMine && !a.isLeading && end > now + 15000 && end <= deadline;
+          return a.status === 'active' && !a.isMine && !a.isLeading && !isExcluded(a.seller) && end > now + 15000 && end <= deadline;
         })
         .filter((a) => CONFIG.INCLUDE_REVERSE || !a.reverse)
         .map((a) => ({ a, ref: refPrice(a) }));

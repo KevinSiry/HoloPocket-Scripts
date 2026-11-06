@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Achat-revente intelligent
 // @namespace    kevin.holopocket
-// @version      1.2
+// @version      1.3
 // @description  Mode auto : enchérit sur les ventes qui se terminent dans moins de 5 min quand la carte part bien en dessous de sa valeur réelle, garde les cartes qui manquaient à ta collection et remet les autres en vente avec une marge.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -35,6 +35,9 @@
   };
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // Joueurs à ne jamais solliciter (ex. ton autre compte) : localStorage 'hp-excluded-players' = ["pseudo", …]
+  const excludedPlayers = () => { try { return new Set(JSON.parse(localStorage.getItem('hp-excluded-players') || '[]').map((x) => String(x).toLowerCase())); } catch { return new Set(); } };
+  const isExcluded = (u) => !!u && excludedPlayers().has(String(u).toLowerCase());
   async function api(method, path, body) {
     const res = await fetch(`/api${path}`, {
       method, credentials: 'same-origin',
@@ -228,7 +231,7 @@
     // Premier tri sans requête : valeur affichée sur la vente
     const pre = auctions.filter((a) => {
       const end = Date.parse(a.endsAt);
-      if (a.status !== 'active' || a.isMine || a.isLeading || a.seller === me.username) return false;
+      if (a.status !== 'active' || a.isMine || a.isLeading || a.seller === me.username || isExcluded(a.seller)) return false; // jamais d'achat à un joueur exclu
       if (end <= now + 10000 || end > deadline) return false;
       if (leadKeys.has(keyOf(a.card.id, a.reverse))) return false; // une seule enchère gagnante par carte
       const shown = a.reverse ? a.card.reverseMarketValue : a.card.marketValue;

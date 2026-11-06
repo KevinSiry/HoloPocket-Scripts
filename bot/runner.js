@@ -37,9 +37,12 @@ const cfg = {
   scripts: list(env.HP_SCRIPTS).length ? list(env.HP_SCRIPTS).map((n) => (n.endsWith('.user.js') ? n : `holopocket-${n}.user.js`)) : file.scripts || DEFAULT_SCRIPTS,
   checkUpdatesMin: +(env.HP_CHECK_UPDATES_MIN || file.checkUpdatesMin || 15),
   reloadEveryH: +(env.HP_RELOAD_EVERY_H || file.reloadEveryH || 6),
+  exclude: list(env.HP_EXCLUDE).length ? list(env.HP_EXCLUDE) : file.exclude || [],
 };
 // Interrupteurs des modes auto : activés pour chaque script chargé
 cfg.toggles = file.toggles || Object.fromEntries(cfg.scripts.filter((n) => TOGGLE_OF[n]).map((n) => [TOGGLE_OF[n], '1']));
+// Joueurs exclus : aucun échange, aucun achat (ex. ton autre compte)
+cfg.toggles['hp-excluded-players'] = JSON.stringify(cfg.exclude);
 
 const log = (...a) => console.log(new Date().toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }), '·', ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -80,6 +83,7 @@ function parseCookie(header) {
 
   let scripts = await fetchScripts();
   log('Scripts :', sig(scripts));
+  if (cfg.exclude.length) log('Joueurs exclus :', cfg.exclude.join(', '));
   const page = ctx.pages()[0] || await ctx.newPage();
   page.on('pageerror', (e) => log('Erreur page :', e.message));
   page.on('crash', () => { log('Page plantée, redémarrage'); process.exit(1); });

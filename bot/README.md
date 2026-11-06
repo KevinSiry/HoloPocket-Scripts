@@ -42,6 +42,7 @@ git pull && docker compose up -d --build    # mettre à jour le bot lui-même (l
 | `HP_USERNAME`, `HP_PASSWORD` | identifiants HoloPocket |
 | `HP_EXCLUDE` | pseudos à ne jamais solliciter : aucun échange, aucune enchère sur leurs ventes. Mets-y tes autres comptes pour qu'ils restent indépendants |
 | `HP_SCRIPTS` | scripts à faire tourner (par défaut `auto-booster,echanges`) ; disponibles : `auto-booster, echanges, vendre-doublons, recyclage, achat-revente` |
+| `HP_DEFAULT_BOOSTER` | série ouverte par l'auto-booster si le compte n'a aucun favori (nom ou identifiant, ex. `Nuit Noire` ou `me05`) |
 | `HP_CHECK_UPDATES_MIN` | délai de vérification des nouvelles versions (15 par défaut) |
 | `HP_RELOAD_EVERY_H` | rechargement complet de la page (6 par défaut) |
 | `HP_COOKIE` | variante sans mot de passe (compte Discord) : en-tête Cookie copié depuis le navigateur ; à recopier quand il expire |

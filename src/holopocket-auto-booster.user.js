@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Ouverture auto quand l'énergie est pleine
 // @namespace    kevin.holopocket
-// @version      2.0
+// @version      2.1
 // @description  Surveille l'énergie en arrière-plan. Dès qu'elle atteint le plafond, ouvre 1 booster de la série favorite qui a le plus de chance de donner une nouvelle carte.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -62,8 +62,18 @@
   }
 
   async function pickBestSet() {
-    const sets = (await api('GET', '/sets')).filter((s) => !s.promo && s.favorite);
-    if (!sets.length) return null;
+    const all = await api('GET', '/sets');
+    let sets = all.filter((s) => !s.promo && s.favorite);
+    // Aucun favori : booster par défaut (localStorage 'hp-booster-default' = id ou nom de la série)
+    if (!sets.length) {
+      let def = '';
+      try { def = (localStorage.getItem('hp-booster-default') || '').trim().toLowerCase(); } catch {}
+      if (!def) return null;
+      const norm = (x) => String(x || '').trim().toLowerCase();
+      sets = all.filter((s) => norm(s.id) === def || norm(s.name) === def);
+      if (!sets.length) sets = all.filter((s) => norm(s.name).includes(def)).slice(0, 1);
+      if (!sets.length) throw new Error(`Booster par défaut « ${def} » introuvable`);
+    }
     const rows = await Promise.all(sets.map(async (s) => {
       const id = encodeURIComponent(s.id);
       const [booster, detail] = await Promise.all([api('GET', `/sets/${id}/booster`), api('GET', `/sets/${id}`)]);
@@ -96,7 +106,7 @@
       // Énergie au plafond → on ouvre pour ne rien gaspiller
       while (state.on && packs.stock >= packs.max && state.opens < CONFIG.MAX_OPENS) {
         const best = await pickBestSet();
-        if (!best) { stop('Aucune série en favori.'); return; }
+        if (!best) { stop('Aucune série en favori (et aucun booster par défaut).'); return; }
         if (best.cost > packs.stock) break;
         const res = await openOne(best);
         state.opens++;

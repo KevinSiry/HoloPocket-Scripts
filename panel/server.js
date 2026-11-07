@@ -6,6 +6,11 @@ const auth = require('./lib/auth');
 const { parseBots, createBots } = require('./lib/bots');
 const { computeAlerts } = require('./lib/alerts');
 const { createStore, createReconciler } = require('./lib/booster');
+const { createVault } = require('./lib/vault');
+const { createAccountStore } = require('./lib/accounts');
+const { createFleetClient } = require('./lib/fleet-client');
+const { randomUsername, randomPassword } = require('./lib/names');
+const { sameToken } = require('./lib/token');
 
 const SESSION_MS = 12 * 3600000;
 const PUBLIC = path.join(__dirname, 'public');
@@ -18,6 +23,10 @@ const HEADERS = {
 
 function createApp(opts) {
   const { passwordHash, secret, bots, trustProxy = false, secureCookie = true, now = Date.now } = opts;
+  const accounts = opts.accounts || null; // comptes gérés par le panel (mode flotte)
+  const fleet = opts.fleet || null;
+  const createGapMs = opts.createGapMs ?? 30000; // une création de compte à la fois, 30 s d'écart au minimum
+  let creating = false; let lastCreateAt = 0;
   const store = opts.store || createStore(null);
   const rec = opts.reconciler || createReconciler({ store, push: (n, p) => bots.config(n, p) });
   const throttle = opts.throttle || auth.createThrottle({ now });
@@ -76,20 +85,80 @@ function createApp(opts) {
         const list = await bots.refreshAll();
         await rec.run(list);
         const errs = rec.errors();
+        const view = (b, extra = {}) => ({ name: b.name, online: b.online, lastSeen: b.lastSeen ? new Date(b.lastSeen).toISOString() : null, status: b.status, error: b.error || null, booster: { choice: store.choice(b.name), error: errs[b.name] || null }, ...extra });
+        let out;
+        if (accounts) {
+          const byName = new Map(list.map((b) => [b.name.toLowerCase(), b]));
+          out = accounts.list().map((a) => {
+            const b = byName.get(a.username.toLowerCase());
+            return a.enabled && b ? view({ ...b, name: a.username }, { source: a.source }) : view({ name: a.username, online: false, lastSeen: null, status: null }, { disabled: !a.enabled, source: a.source });
+          });
+        } else out = list.map((b) => view(b));
         return send(res, 200, {
           at: new Date(now()).toISOString(),
           booster: { global: store.global() },
-          bots: list.map((b) => ({ name: b.name, online: b.online, lastSeen: b.lastSeen ? new Date(b.lastSeen).toISOString() : null, status: b.status, booster: { choice: store.choice(b.name), error: errs[b.name] || null } })),
-          alerts: computeAlerts(list, now()),
+          manage: !!accounts,
+          bots: out,
+          alerts: computeAlerts(list.filter((b) => b.online || b.lastSeen != null || accounts), now()),
         });
       }
       if (req.method === 'GET' && p === '/api/logs') {
         const name = url.searchParams.get('bot');
-        const all = bots.names().flatMap((n) => (name && name !== n ? [] : (bots.get(n).logs || []).map((l) => ({ ...l, bot: n }))));
+        const all = bots.names().flatMap((n) => (name && name !== n ? [] : ((bots.get(n) || {}).logs || []).map((l) => ({ ...l, bot: n }))));
         all.sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.id - b.id);
         const level = url.searchParams.get('level');
         return send(res, 200, { lines: all.filter((l) => !level || l.level === level).slice(-300) });
       }
+      // Comptes gérés par le panel : créer, ajouter, désactiver, supprimer, voir le mot de passe
+      if (accounts && (p === '/api/accounts' || p.startsWith('/api/accounts/'))) {
+        const parts = p.split('/'); // ['', 'api', 'accounts', name?, action?]
+        const name = parts[3] ? decodeURIComponent(parts[3]) : null;
+        const readJson = async () => { try { return JSON.parse(await readBody(req)); } catch (e) { if (e.status) throw e; throw Object.assign(new Error('JSON invalide'), { status: 400 }); } };
+        try {
+          if (req.method === 'POST' && p === '/api/accounts/create') {
+            if (!fleet) return send(res, 501, { error: 'création automatique indisponible' });
+            const wait = createGapMs - (now() - lastCreateAt);
+            if (creating || wait > 0) return send(res, 429, { error: creating ? 'Une création est déjà en cours.' : `Patiente ${Math.ceil(wait / 1000)} s avant de créer un autre compte.` });
+            creating = true; lastCreateAt = now();
+            try {
+              let last = null;
+              for (let i = 0; i < 4; i++) {
+                const username = randomUsername(accounts.usernames());
+                const password = randomPassword();
+                try { last = await fleet.register(username, password); } catch (e) { return send(res, 502, { error: `La flotte ne répond pas : ${e.message}` }); }
+                if (last.ok) {
+                  accounts.add({ username, password, source: 'created' });
+                  await fleet.sync();
+                  return send(res, 200, { ok: true, username });
+                }
+                if (!last.taken) break; // refus pour une autre raison : inutile d'insister
+              }
+              return send(res, 502, { error: `Inscription refusée par HoloPocket : ${last && last.error}` });
+            } finally { creating = false; }
+          }
+          if (req.method === 'POST' && p === '/api/accounts' ) {
+            const b = await readJson();
+            accounts.add({ username: b.username, password: b.password, source: 'manual' });
+            if (fleet) await fleet.sync();
+            return send(res, 200, { ok: true });
+          }
+          if (name && req.method === 'POST' && parts[4] === 'reveal') return send(res, 200, { password: accounts.reveal(name) });
+          if (name && req.method === 'PUT' && !parts[4]) {
+            const b = await readJson();
+            if (typeof b.enabled !== 'boolean') return send(res, 400, { error: 'enabled (booléen) attendu' });
+            accounts.setEnabled(name, b.enabled);
+            if (fleet) await fleet.sync();
+            return send(res, 200, { ok: true });
+          }
+          if (name && req.method === 'DELETE' && !parts[4]) {
+            accounts.remove(name);
+            if (fleet) await fleet.sync();
+            return send(res, 200, { ok: true });
+          }
+        } catch (e) { return send(res, e.status || 500, { error: e.status ? e.message : 'erreur interne' }); }
+        return send(res, 404, { error: 'introuvable' });
+      }
+
       // Booster : réglage global et choix par compte (c'est le panel qui l'envoie aux bots)
       const okChoice = (v, allowGlobal) => v && typeof v === 'object' && (v.mode === 'auto' || (allowGlobal && v.mode === 'global') || (v.mode === 'fixed' && typeof v.setId === 'string' && v.setId.trim()));
       if (req.method === 'PUT' && (p === '/api/booster/global' || /^\/api\/bots\/[^/]+\/booster$/.test(p))) {
@@ -130,25 +199,51 @@ function createApp(opts) {
   return server;
 }
 
+// Liste des comptes pour la flotte : réseau Docker interne seulement (jamais derrière Traefik), jeton obligatoire
+function createInternalApp({ accounts, token }) {
+  return http.createServer((req, res) => {
+    const m = /^Bearer (.+)$/.exec(req.headers.authorization || '');
+    const send = (status, body) => { const d = JSON.stringify(body); res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(d), 'Cache-Control': 'no-store' }); res.end(d); };
+    if (!m || !sameToken(m[1], token)) return send(401, { error: 'non autorisé' });
+    if (req.method === 'GET' && req.url === '/internal/fleet') return send(200, { accounts: accounts.fleetList() });
+    return send(404, { error: 'introuvable' });
+  });
+}
+
 function main() {
   const env = process.env;
-  const need = ['PANEL_PASSWORD_HASH', 'PANEL_SECRET', 'PANEL_TOKEN', 'PANEL_BOTS'].filter((k) => !env[k]);
+  const fleetMode = !!env.PANEL_FLEET_URL;
+  const need = ['PANEL_PASSWORD_HASH', 'PANEL_SECRET', 'PANEL_TOKEN', ...(fleetMode ? [] : ['PANEL_BOTS'])].filter((k) => !env[k]);
   if (need.length) { console.error(`Variables manquantes : ${need.join(', ')} (voir .env.panel.example)`); process.exit(2); }
   if (env.PANEL_SECRET.length < 32) { console.error('PANEL_SECRET trop court (32 caractères minimum).'); process.exit(2); }
-  const list = parseBots(env.PANEL_BOTS);
-  if (!list.length) { console.error('PANEL_BOTS invalide : attendu compte1=http://compte1:3100,compte2=http://compte2:3100'); process.exit(2); }
-  const bots = createBots({ bots: list, token: env.PANEL_TOKEN });
-  const store = createStore(path.join(env.PANEL_DATA_DIR || '/data', 'panel-state.json'));
+  const dir = env.PANEL_DATA_DIR || '/data';
+  let accounts = null; let fleet = null; let bots;
+  if (fleetMode) {
+    // Mode flotte : les comptes vivent dans le panel (chiffrés), un seul conteneur les fait tourner
+    accounts = createAccountStore({ file: path.join(dir, 'accounts.json'), vault: createVault(env.PANEL_SECRET) });
+    fleet = createFleetClient({ url: env.PANEL_FLEET_URL, token: env.PANEL_TOKEN });
+    bots = createBots({
+      token: env.PANEL_TOKEN,
+      bots: () => accounts.list().filter((a) => a.enabled).map((a) => ({ name: a.username, url: `${fleet.base}/accounts/${encodeURIComponent(a.username)}` })),
+    });
+    createInternalApp({ accounts, token: env.PANEL_TOKEN }).listen(+(env.PANEL_INTERNAL_PORT || 8081), '0.0.0.0');
+  } else {
+    // Ancien mode : un conteneur par compte, liste fixe dans PANEL_BOTS
+    const list = parseBots(env.PANEL_BOTS);
+    if (!list.length) { console.error('PANEL_BOTS invalide : attendu compte1=http://compte1:3100,compte2=http://compte2:3100'); process.exit(2); }
+    bots = createBots({ bots: list, token: env.PANEL_TOKEN });
+  }
+  const store = createStore(path.join(dir, 'panel-state.json'));
   const reconciler = createReconciler({ store, push: (n, p) => bots.config(n, p) });
-  const app = createApp({ store, reconciler,
+  const app = createApp({ store, reconciler, accounts, fleet,
     passwordHash: env.PANEL_PASSWORD_HASH, secret: env.PANEL_SECRET, bots,
     trustProxy: env.PANEL_TRUST_PROXY === '1', secureCookie: env.PANEL_INSECURE_COOKIE !== '1',
   });
   // Les journaux et alertes se construisent même quand personne ne regarde le panel
   setInterval(() => bots.refreshAll().then((l) => reconciler.run(l)).catch(() => {}), 10000);
   const port = +(env.PANEL_PORT || 8080);
-  app.listen(port, '0.0.0.0', () => console.log(`Panel à l’écoute sur le port ${port} · ${list.length} compte(s)`));
+  app.listen(port, '0.0.0.0', () => console.log(`Panel à l’écoute sur le port ${port} · ${fleetMode ? 'mode flotte' : `${bots.names().length} compte(s)`}`));
 }
 
 if (require.main === module) main();
-module.exports = { createApp };
+module.exports = { createApp, createInternalApp };

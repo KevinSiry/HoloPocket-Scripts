@@ -156,3 +156,104 @@ test('déconnexion : cookie effacé ; en-têtes de sécurité présents', async 
   assert.match(g.headers.get('x-robots-tag'), /noindex/);
   s.close();
 });
+
+// ───── Comptes gérés par le panel (mode flotte) ─────
+const { createVault } = require('../lib/vault');
+const { createAccountStore } = require('../lib/accounts');
+const { createInternalApp } = require('../server');
+
+async function bootFleet(over = {}) {
+  const accounts = createAccountStore({ file: null, vault: createVault(SECRET) });
+  const registered = []; let syncs = 0;
+  const fleet = { register: over.register || (async (u, p) => { registered.push([u, p]); return { ok: true }; }), sync: async () => { syncs++; } };
+  const s = await boot({ fns: { refreshAll: async () => [] }, app: { accounts, fleet, createGapMs: over.gap ?? 0 } });
+  return { ...s, accounts, registered, syncs: () => syncs, h: { 'X-Panel': '1' } };
+}
+
+test('comptes : création automatique — pseudo et mot de passe aléatoires, jamais renvoyés, flotte prévenue', async () => {
+  const s = await bootFleet();
+  const cookie = await s.session();
+  const r = await s.req('POST', '/api/accounts/create', { headers: s.h, cookie });
+  const body = await r.json();
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(s.registered.length, 1);
+  const [u, p] = s.registered[0];
+  assert.strictEqual(body.username, u);
+  assert.ok(!JSON.stringify(body).includes(p), 'le mot de passe ne sort jamais à la création');
+  assert.strictEqual(s.accounts.reveal(u), p);
+  assert.strictEqual(s.accounts.list()[0].source, 'created');
+  assert.strictEqual(s.syncs(), 1);
+  s.close();
+});
+test('comptes : pseudo pris → nouvel essai avec un autre pseudo ; refus d’une autre nature → arrêt et message', async () => {
+  let n = 0;
+  const s = await bootFleet({ register: async () => (++n < 3 ? { ok: false, taken: true, error: 'déjà utilisé' } : { ok: true }) });
+  const r = await s.req('POST', '/api/accounts/create', { headers: s.h, cookie: await s.session() });
+  assert.strictEqual(r.status, 200);
+  assert.strictEqual(n, 3);
+  s.close();
+  const t = await bootFleet({ register: async () => ({ ok: false, taken: false, error: 'email requis' }) });
+  const bad = await t.req('POST', '/api/accounts/create', { headers: t.h, cookie: await t.session() });
+  assert.strictEqual(bad.status, 502);
+  assert.match((await bad.json()).error, /email requis/);
+  assert.deepStrictEqual(t.accounts.list(), []);
+  t.close();
+});
+test('comptes : une création à la fois, avec un délai minimal entre deux', async () => {
+  const s = await bootFleet({ gap: 30000 });
+  const cookie = await s.session();
+  assert.strictEqual((await s.req('POST', '/api/accounts/create', { headers: s.h, cookie })).status, 200);
+  const second = await s.req('POST', '/api/accounts/create', { headers: s.h, cookie });
+  assert.strictEqual(second.status, 429);
+  assert.match((await second.json()).error, /Patiente/);
+  assert.strictEqual(s.registered.length, 1);
+  s.close();
+});
+test('comptes : ajout manuel, doublon refusé, pseudo invalide refusé', async () => {
+  const s = await bootFleet();
+  const cookie = await s.session();
+  const add = (b) => s.req('POST', '/api/accounts', { body: b, headers: s.h, cookie });
+  assert.strictEqual((await add({ username: 'Alice', password: 'pw' })).status, 200);
+  assert.strictEqual((await add({ username: 'alice', password: 'pw' })).status, 409);
+  assert.strictEqual((await add({ username: 'a b', password: 'pw' })).status, 400);
+  s.close();
+});
+test('comptes : voir le mot de passe, désactiver, supprimer — et vue d’ensemble avec les comptes désactivés', async () => {
+  const s = await bootFleet();
+  const cookie = await s.session();
+  s.accounts.add({ username: 'Alice', password: 'secret1' });
+  s.accounts.add({ username: 'Bobby', password: 'secret2' });
+  assert.deepStrictEqual(await (await s.req('POST', '/api/accounts/Alice/reveal', { headers: s.h, cookie })).json(), { password: 'secret1' });
+  assert.strictEqual((await s.req('PUT', '/api/accounts/Bobby', { body: { enabled: false }, headers: s.h, cookie })).status, 200);
+  const o = await (await s.req('GET', '/api/overview', { cookie })).json();
+  assert.strictEqual(o.manage, true);
+  assert.deepStrictEqual(o.bots.map((b) => [b.name, !!b.disabled]), [['Alice', false], ['Bobby', true]]);
+  assert.ok(!JSON.stringify(o).includes('secret'));
+  assert.strictEqual((await s.req('DELETE', '/api/accounts/Alice', { headers: s.h, cookie })).status, 200);
+  assert.strictEqual((await s.req('DELETE', '/api/accounts/Alice', { headers: s.h, cookie })).status, 404);
+  assert.deepStrictEqual(s.accounts.usernames(), ['Bobby']);
+  s.close();
+});
+test('comptes : session et en-tête X-Panel exigés partout (y compris voir le mot de passe)', async () => {
+  const s = await bootFleet();
+  s.accounts.add({ username: 'Alice', password: 'secret1' });
+  const cookie = await s.session();
+  for (const [m, p] of [['POST', '/api/accounts/create'], ['POST', '/api/accounts/Alice/reveal'], ['DELETE', '/api/accounts/Alice'], ['PUT', '/api/accounts/Alice']]) {
+    assert.strictEqual((await s.req(m, p, { cookie })).status, 403, `${m} ${p} sans X-Panel`);
+    assert.strictEqual((await s.req(m, p, { headers: s.h })).status, 401, `${m} ${p} sans session`);
+  }
+  assert.strictEqual(s.accounts.usernames().length, 1);
+  s.close();
+});
+test('liste interne pour la flotte : jeton obligatoire, mots de passe déchiffrés', async () => {
+  const accounts = createAccountStore({ file: null, vault: createVault(SECRET) });
+  accounts.add({ username: 'Alice', password: 'secret1' });
+  const srv = createInternalApp({ accounts, token: 'tok'.repeat(10) });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${srv.address().port}/internal/fleet`;
+  assert.strictEqual((await fetch(url)).status, 401);
+  assert.strictEqual((await fetch(url, { headers: { Authorization: 'Bearer faux' } })).status, 401);
+  const ok = await fetch(url, { headers: { Authorization: `Bearer ${'tok'.repeat(10)}` } });
+  assert.deepStrictEqual(await ok.json(), { accounts: [{ username: 'Alice', password: 'secret1', enabled: true }] });
+  srv.close();
+});

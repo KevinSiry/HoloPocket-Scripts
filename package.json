@@ -3,6 +3,6 @@
   "private": true,
   "scripts": {
     "build": "python3 src/build.py",
-    "test": "node --test tests/auto-booster-force.test.js bot/test/panel-config.test.js bot/test/panel-api.test.js bot/test/panel-glue.test.js bot/test/accounts.test.js panel/test/auth.test.js panel/test/alerts.test.js panel/test/bots.test.js panel/test/booster.test.js panel/test/server.test.js"
+    "test": "node --test tests/auto-booster-force.test.js bot/test/panel-config.test.js bot/test/panel-api.test.js bot/test/panel-glue.test.js bot/test/accounts.test.js bot/test/fleet.test.js bot/test/register.test.js panel/test/auth.test.js panel/test/alerts.test.js panel/test/bots.test.js panel/test/booster.test.js panel/test/accounts.test.js panel/test/server.test.js"
   }
 }

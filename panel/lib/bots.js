@@ -11,7 +11,13 @@ function parseBots(str) {
 }
 
 function createBots({ bots, token, fetchFn = fetch, timeoutMs = 3000, now = Date.now }) {
-  const known = new Map(bots.map((b) => [b.name, { name: b.name, online: false, lastSeen: null, status: null, logs: [], lastLog: 0 }]));
+  // `bots` : liste fixe, ou fonction qui renvoie la liste à jour (comptes ajoutés depuis le panel)
+  const getList = typeof bots === 'function' ? bots : () => bots;
+  const known = new Map();
+  const entry = (b) => {
+    if (!known.has(b.name)) known.set(b.name, { name: b.name, online: false, lastSeen: null, status: null, error: null, logs: [], lastLog: 0 });
+    return known.get(b.name);
+  };
   const call = async (b, method, path, body) => {
     const r = await fetchFn(b.url + path, {
       method, signal: AbortSignal.timeout(timeoutMs),
@@ -22,27 +28,33 @@ function createBots({ bots, token, fetchFn = fetch, timeoutMs = 3000, now = Date
     if (!r.ok) { const e = new Error(data.error || `HTTP ${r.status}`); e.status = r.status; throw e; }
     return data;
   };
-  const find = (name) => bots.find((b) => b.name === name);
+  const find = (name) => getList().find((b) => b.name === name);
 
   async function refresh(b) {
-    const k = known.get(b.name);
+    const k = entry(b);
     try {
       k.status = await call(b, 'GET', '/status');
-      k.online = true;
+      k.online = true; k.error = null;
       k.lastSeen = now();
-      const l = await call(b, 'GET', `/logs?after=${k.lastLog}&limit=200`).catch(() => null);
-      if (l) {
-        // Le bot a redémarré : ses identifiants repartent de 1
-        if (l.last < k.lastLog) { k.logs = []; k.lastLog = 0; return refresh(b); }
-        k.logs = k.logs.concat(l.lines).slice(-500);
-        k.lastLog = l.last;
-      }
-    } catch { k.online = false; }
+    } catch (e) { k.online = false; k.error = e.status === 503 ? e.message : null; }
+    // Le journal se lit même quand le compte est arrêté : c'est lui qui dit pourquoi
+    const l = await call(b, 'GET', `/logs?after=${k.lastLog}&limit=200`).catch(() => null);
+    if (l) {
+      // Le bot a redémarré : ses identifiants repartent de 1
+      if (l.last < k.lastLog) { k.logs = []; k.lastLog = 0; return refresh(b); }
+      k.logs = k.logs.concat(l.lines).slice(-500);
+      k.lastLog = l.last;
+    }
   }
   return {
-    names: () => bots.map((b) => b.name),
+    names: () => getList().map((b) => b.name),
     has: (name) => !!find(name),
-    async refreshAll() { await Promise.all(bots.map(refresh)); return [...known.values()]; },
+    async refreshAll() {
+      const list = getList();
+      for (const n of [...known.keys()]) if (!list.some((b) => b.name === n)) known.delete(n);
+      await Promise.all(list.map(refresh));
+      return list.map((b) => known.get(b.name));
+    },
     get: (name) => known.get(name),
     sets: (name) => call(find(name), 'GET', '/sets'),
     config: (name, patch) => call(find(name), 'PUT', '/config', patch),

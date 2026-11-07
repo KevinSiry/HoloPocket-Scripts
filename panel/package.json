@@ -4,5 +4,5 @@
   "private": true,
   "description": "Panel de gestion centralisé des comptes HoloPocket (aucune dépendance)",
   "main": "server.js",
-  "scripts": { "start": "node server.js", "test": "node --test test/auth.test.js test/alerts.test.js test/bots.test.js test/booster.test.js test/server.test.js" }
+  "scripts": { "start": "node server.js", "test": "node --test test/auth.test.js test/alerts.test.js test/bots.test.js test/booster.test.js test/accounts.test.js test/server.test.js" }
 }

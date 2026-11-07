@@ -37,7 +37,7 @@ function readBody(req) {
  *   restart(): void,                   arrête le bot (Docker le relance)
  * }
  */
-function createPanelServer(deps) {
+function createPanelHandler(deps) {
   if (!deps.token) throw new Error('PANEL_TOKEN manquant : API du panel désactivée');
   const send = (res, status, body) => {
     const data = JSON.stringify(body);
@@ -45,7 +45,7 @@ function createPanelServer(deps) {
     res.end(data);
   };
 
-  return http.createServer(async (req, res) => {
+  return async (req, res) => {
     try {
       const m = /^Bearer (.+)$/.exec(req.headers.authorization || '');
       if (!m || !sameToken(m[1], deps.token)) return send(res, 401, { error: 'non autorisé' });
@@ -86,7 +86,9 @@ function createPanelServer(deps) {
     } catch (e) {
       return send(res, e.status || 500, { error: e.message || 'erreur' });
     }
-  });
+  };
 }
 
-module.exports = { createPanelServer, sameToken };
+function createPanelServer(deps) { return http.createServer(createPanelHandler(deps)); }
+
+module.exports = { createPanelServer, createPanelHandler, sameToken, readBody };

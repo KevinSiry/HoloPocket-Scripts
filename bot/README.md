@@ -6,46 +6,54 @@ Les scripts sont lus depuis ce dépôt GitHub : une nouvelle version publiée es
 
 ## Installation
 
-Prérequis : Docker et Docker Compose sur le serveur (`docker compose version` doit répondre).
+Prérequis : Docker et Docker Compose sur le serveur (`docker compose version` doit répondre), et le réseau Docker `proxy` de Traefik.
 
 ```bash
 git clone https://github.com/KevinSiry/HoloPocket-Scripts.git
-cd HoloPocket-Scripts/bot
+cd HoloPocket-Scripts
 
-cp .env.shared.example .env.shared
-nano .env.shared         # HP_ACCOUNTS (tous tes pseudos), HP_PRIORITY_TARGET, HP_SCRIPTS… communs à tous les comptes
-cp .env.example .env.compte1
-cp .env.example .env.compte2
-nano .env.compte1        # HP_USERNAME / HP_PASSWORD du compte 1 (rien d'autre à mettre)
-nano .env.compte2        # HP_USERNAME / HP_PASSWORD du compte 2
-chmod 600 .env.shared .env.compte*
+# secrets (sans Node sur le VPS, le hash se fait avec Docker)
+docker run --rm -it -v "$PWD/panel":/app -w /app node:22-alpine node hash-password.js   # -> PANEL_PASSWORD_HASH
+openssl rand -hex 32    # une fois pour PANEL_SECRET, une fois pour PANEL_TOKEN
 
-docker compose up -d --build
-docker compose logs -f   # chaque compte doit afficher « Connecté en tant que … » puis « Page chargée, scripts injectés »
+cd bot
+cp ../panel/.env.panel.example .env.panel     # sous-domaine, hash, secret, jeton
+cp .env.shared.example .env.shared            # jeton (le même), cible prioritaire, scripts
+chmod 600 .env.panel .env.shared
+
+docker compose --env-file .env.panel up -d --build
+docker compose logs -f fleet panel
 ```
 
-Un seul compte ? Supprime le bloc `compte2` de `docker-compose.yml` (ou lance `docker compose up -d compte1`) ; de même pour `compte3`.
+Les comptes se créent ensuite **dans le panel** (`https://ton-sous-domaine`) : « Créer un compte automatiquement » (pseudo et mot de passe aléatoires)
+ou « Ajouter un compte existant ». Un conteneur (`fleet`) fait tourner tous les comptes, un Chromium par compte (prévois environ 0,5 Go de mémoire chacun).
 
 ## Au quotidien
 
 ```bash
-docker compose logs -f --tail 100 compte1   # journal d'un compte (achats, ventes, échanges…)
-docker compose logs -f --tail 100           # les deux comptes
-docker compose restart compte2              # redémarrer un compte (après avoir modifié son .env)
-docker compose stop compte2                 # arrêter un compte
+docker compose logs -f --tail 100 fleet    # journal de tous les comptes (préfixés par pseudo) ; le panel a aussi un onglet Journal
+# redémarrer ou désactiver UN compte : depuis le panel (le conteneur fleet continue pour les autres)
+docker compose restart fleet               # redémarrer tous les comptes (après avoir modifié .env.shared)
 docker compose down                         # tout arrêter
 git pull && docker compose up -d --build    # mettre à jour le bot lui-même (les scripts se mettent à jour seuls)
 ```
 
-## Plusieurs comptes sans les configurer un par un
+## Panel de gestion
 
-- `.env.shared` : réglages communs à tous les comptes (liste des comptes, cible prioritaire, scripts, jeton du panel).
-- `.env.compteN` : seulement `HP_USERNAME` et `HP_PASSWORD` du compte. Une variable écrite ici passe avant `.env.shared`.
-- `HP_ACCOUNTS` : les pseudos de tous tes comptes. Chacun ignore automatiquement les autres (aucun échange, aucune enchère entre eux), sans `HP_EXCLUDE`.
-- `HP_PRIORITY_TARGET` : le compte qui reçoit les dons des autres. Il reste exclu des échanges normaux ; il ne se donne rien à lui-même (rien à retirer dans son fichier).
-- Ajouter un compte : un bloc dans `docker-compose.yml`, un `.env.compteN`, son pseudo dans `HP_ACCOUNTS`, et son adresse dans `PANEL_BOTS`.
+Un site protégé par mot de passe : vue d'ensemble des comptes (pièces, énergie, échanges n/20, ventes, en ligne ou non), **booster à ouvrir** (un réglage global que les comptes suivent par défaut, modifiable par compte), scripts activables par compte, journal et alertes.
+Les réglages sont conservés dans le volume de chaque compte (`panel-config.json`) et passent avant `.env.shared`.
 
-## Réglages (`.env.shared` ou `.env.<compte>`)
+## Comptes : gérés par le panel
+
+- **Créer** : le panel choisit un pseudo et un mot de passe aléatoires (sans lien d'un compte à l'autre), inscrit le compte sur HoloPocket depuis le conteneur `fleet`, puis le démarre. Une création à la fois, 30 s d'écart minimum.
+- **Ajouter un compte existant** : pseudo et mot de passe saisis dans le panel.
+- **Stockage** : les mots de passe sont chiffrés (AES-256-GCM) dans le volume du panel, avec une clé dérivée de `PANEL_SECRET` : ne change pas `PANEL_SECRET` après coup. « Voir le mot de passe » les affiche à la demande.
+- **Désactiver / Supprimer** : un compte désactivé s'arrête mais reste enregistré ; le supprimer efface son mot de passe (le compte existe toujours sur HoloPocket).
+- **Ils s'ignorent entre eux** : aucun échange ni enchère entre les comptes du panel. `HP_PRIORITY_TARGET` (dans `.env.shared`) reçoit les dons des autres et ne se donne rien à lui-même.
+- **Un compte qui plante** (identifiants refusés, page plantée) est relancé seul avec une attente croissante (30 s jusqu'à 30 min) sans toucher aux autres. Son journal reste lisible dans le panel.
+- Mode « un compte par conteneur » : sans `PANEL_URL`, `runner.js` fait tourner un seul compte d'après `HP_USERNAME` / `HP_PASSWORD` du `.env`, comme avant.
+
+## Réglages (`.env.shared`)
 
 | Variable | Rôle |
 |---|---|
@@ -62,29 +70,9 @@ git pull && docker compose up -d --build    # mettre à jour le bot lui-même (l
 
 Le mode auto de chaque script listé est activé automatiquement.
 
-## Panel de gestion (tous les comptes au même endroit)
-
-Un petit site protégé par mot de passe : vue d'ensemble des comptes (pièces, énergie, échanges n/20, ventes, bot en ligne),
-choix du booster à ouvrir (Auto ou une série fixe), scripts activables/coupables par compte, journal et alertes.
-Les réglages faits depuis le panel sont conservés (`data/<compte>/panel-config.json`) et passent avant le `.env`.
-
-```bash
-cd HoloPocket-Scripts
-node panel/hash-password.js                 # donne PANEL_PASSWORD_HASH
-openssl rand -hex 32                         # une fois pour PANEL_SECRET, une fois pour PANEL_TOKEN
-cp panel/.env.panel.example bot/.env.panel   # puis remplir (sous-domaine, hash, secret, jeton)
-chmod 600 bot/.env.panel
-echo "PANEL_TOKEN=<le même jeton>" >> bot/.env.compte1   # idem .env.compte2
-cd bot && git pull && docker compose --env-file .env.panel up -d --build
-```
-
-Prérequis : un enregistrement DNS `A` du sous-domaine (`PANEL_DOMAIN`) vers le VPS, et le réseau Docker `proxy` de Traefik (comme Kroniq).
-Chaque bot expose son API (port 3100) uniquement sur le réseau Docker interne, protégée par `PANEL_TOKEN` ; sans `PANEL_TOKEN`, l'API reste éteinte.
-Un compte ajouté dans `docker-compose.yml` doit aussi être ajouté à `PANEL_BOTS`. Sans Traefik, ne lance pas le service `panel` (`docker compose up -d compte1 compte2`).
-
 ## À savoir
 
 - Les fichiers `.env.*` contiennent des mots de passe : jamais publiés (`.gitignore`), garde-les lisibles par toi seul (`chmod 600`).
-- La mémoire des scripts de chaque compte est dans `bot/data/<compte>/` : la supprimer remet ce compte à zéro.
+- La mémoire des scripts de chaque compte est dans `bot/data/fleet/<pseudo>/` : la supprimer remet ce compte à zéro.
 - **Un seul endroit à la fois par compte.** Si les modes auto d'un compte tournent aussi dans ton Chrome, tout est fait en double.
   Quand le bot tourne, désactive les interrupteurs « Auto- » dans ton navigateur (les assistants de jeux peuvent rester).

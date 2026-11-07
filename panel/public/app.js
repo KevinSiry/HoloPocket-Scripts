@@ -24,6 +24,7 @@ const ago = (iso) => {
 };
 const num = (n) => (n == null ? '–' : Number(n).toLocaleString('fr-FR'));
 
+let manage = false; // le panel gère les comptes (mode flotte)
 let busy = 0; // pause du rafraîchissement pendant une action
 let openSets = {};
 
@@ -105,16 +106,54 @@ function scriptsBlock(bot, card) {
   return box;
 }
 
+const acc = (bot) => `/api/accounts/${encodeURIComponent(bot.name)}`;
+function manageBlock(bot, card) {
+  const row = el('div', 'actions');
+  const btn = (label, fn, cls = 'ghost') => { const b = el('button', cls, label); b.addEventListener('click', fn); row.append(b); };
+  btn('Voir le mot de passe', () => act(card, async () => { const r = await api('POST', `${acc(bot)}/reveal`); prompt(`Mot de passe de ${bot.name} (à copier)`, r.password); }));
+  btn(bot.disabled ? 'Activer' : 'Désactiver', () => act(card, () => api('PUT', acc(bot), { enabled: !!bot.disabled }).then(() => toast(bot.disabled ? 'Compte activé' : 'Compte désactivé'))));
+  btn('Supprimer', () => { if (confirm(`Supprimer ${bot.name} du panel ?\nSon mot de passe sera perdu (le compte reste sur HoloPocket).`)) act(card, () => api('DELETE', acc(bot)).then(() => toast('Compte supprimé'))); });
+  return row;
+}
+
+function addCard() {
+  const card = el('article', 'card add');
+  card.append(el('h2', null, 'Ajouter un compte'));
+  const create = el('button', null, 'Créer un compte automatiquement');
+  create.addEventListener('click', () => act(card, async () => {
+    toast('Création en cours, quelques secondes…');
+    const r = await api('POST', '/api/accounts/create');
+    toast(`Compte créé : ${r.username}`);
+  }));
+  card.append(create, el('p', 'muted', 'Pseudo et mot de passe aléatoires, enregistrés chiffrés dans le panel.'));
+  const det = el('details');
+  det.append(el('summary', null, 'Ajouter un compte existant'));
+  const f = el('form', 'form');
+  const u = el('input'); u.placeholder = 'Pseudo'; u.required = true; u.autocomplete = 'off'; u.setAttribute('aria-label', 'Pseudo');
+  const p = el('input'); p.type = 'password'; p.placeholder = 'Mot de passe'; p.required = true; p.autocomplete = 'new-password'; p.setAttribute('aria-label', 'Mot de passe');
+  const ok = el('button', null, 'Ajouter'); ok.type = 'submit';
+  f.append(u, p, ok);
+  f.addEventListener('submit', (e) => { e.preventDefault(); act(card, async () => { await api('POST', '/api/accounts', { username: u.value.trim(), password: p.value }); u.value = ''; p.value = ''; toast('Compte ajouté'); }); });
+  det.append(f);
+  card.append(det);
+  return card;
+}
+
 async function accountCard(bot, globalChoice) {
   const card = el('article', 'card');
   const head = el('div', 'head');
   const s = bot.status;
   head.append(el('h2', null, (s && s.account && s.account.user) || bot.name));
-  head.append(el('span', bot.online ? 'pill ok' : 'pill bad', bot.online ? 'En ligne' : 'Hors ligne'));
+  head.append(el('span', bot.disabled ? 'pill off' : bot.online ? 'pill ok' : 'pill bad', bot.disabled ? 'Désactivé' : bot.online ? 'En ligne' : 'Hors ligne'));
   card.append(head);
-  if (!s) { card.append(el('p', 'muted', 'Aucune donnée pour le moment.')); return card; }
-  if (!bot.online) card.append(el('p', 'muted', `Dernier contact : ${ago(bot.lastSeen)}`));
-  if (bot.name !== (s.account && s.account.user)) card.append(el('p', 'muted', `Bot « ${bot.name} »`));
+  if (bot.disabled) { card.append(el('p', 'muted', 'Ce compte ne tourne pas.')); if (manage) card.append(manageBlock(bot, card)); return card; }
+  if (!s) {
+    card.append(el('p', 'muted', bot.error || 'Démarrage en cours…'));
+    if (manage) card.append(manageBlock(bot, card));
+    return card;
+  }
+  if (!bot.online) card.append(el('p', 'muted', bot.error || `Dernier contact : ${ago(bot.lastSeen)}`));
+  if (!manage && bot.name !== (s.account && s.account.user)) card.append(el('p', 'muted', `Bot « ${bot.name} »`));
   const grid = el('div', 'grid');
   if (s.account) {
     grid.append(stat('Pièces', num(s.account.balance)));
@@ -129,6 +168,7 @@ async function accountCard(bot, globalChoice) {
     r.addEventListener('click', () => { if (confirm(`Redémarrer le bot ${bot.name} ?`)) act(card, () => api('POST', `/api/bots/${encodeURIComponent(bot.name)}/restart`).then(() => toast('Redémarrage demandé'))); });
     card.append(r);
   }
+  if (manage) card.append(manageBlock(bot, card));
   return card;
 }
 
@@ -153,12 +193,13 @@ async function refresh(force) {
   if (busy && !force) return;
   try {
     const d = await api('GET', '/api/overview');
+    manage = !!d.manage;
     renderAlerts(d.alerts);
     // Liste des séries (la même pour tous les comptes) : lue une fois sur le premier bot en ligne
     if (!openSets._any || !openSets._any.length) { const on = d.bots.find((b) => b.online); if (on) { try { openSets._any = await api('GET', `/api/bots/${encodeURIComponent(on.name)}/sets`); } catch {} } }
     const cards = d.bots.map((b) => accountCard(b, d.booster.global));
     const resolved = await Promise.all(cards);
-    if (!busy) $('accounts').replaceChildren(globalCard(d.booster.global, d.bots), ...resolved);
+    if (!busy) $('accounts').replaceChildren(globalCard(d.booster.global, d.bots), ...resolved, ...(manage ? [addCard()] : []));
     const sel = $('logBot');
     if (sel.options.length === 1) for (const b of d.bots) { const o = el('option', null, b.name); o.value = b.name; sel.append(o); }
     $('stamp').textContent = `Mis à jour ${new Date(d.at).toLocaleTimeString('fr-FR')}`;

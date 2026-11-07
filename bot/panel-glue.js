@@ -120,7 +120,16 @@ function createGlue(deps) {
     });
   }
 
-  return { status, sets, applyConfig, logs: deps.logs };
+  // Les exclusions ont changé (compte ajouté ou retiré) : on réécrit les interrupteurs et on recharge pour qu'ils soient pris en compte
+  function refreshToggles({ reload = false } = {}) {
+    return serial(async () => {
+      cfg.toggles = buildToggles();
+      await pushToggles();
+      if (reload) await load();
+    });
+  }
+
+  return { status, sets, applyConfig, refreshToggles, logs: deps.logs };
 }
 
 module.exports = { createGlue, TRADES_MAX };

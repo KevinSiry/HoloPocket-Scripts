@@ -28,11 +28,20 @@ let manage = false; // le panel gère les comptes (mode flotte)
 let busy = 0; // pause du rafraîchissement pendant une action
 let openSets = {};
 
+// Pastille compacte : intitulé, valeur, jauge fine facultative
 function stat(label, value, meterVal, meterMax) {
   const d = el('div', 'stat');
   d.append(el('span', 'k', label), el('span', 'v', value));
   if (meterMax) { const m = el('progress'); m.max = meterMax; m.value = meterVal || 0; d.append(m); }
   return d;
+}
+const openCards = new Set(); // réglages dépliés (gardés d'un rafraîchissement à l'autre)
+function fold(name, title, ...children) {
+  const det = el('details', 'more');
+  det.open = openCards.has(name);
+  det.addEventListener('toggle', () => { if (det.open) openCards.add(name); else openCards.delete(name); });
+  det.append(el('summary', null, title), ...children);
+  return det;
 }
 
 async function act(card, fn) {
@@ -77,20 +86,22 @@ function boosterBlock(bot, card, globalChoice) {
   return box;
 }
 
-function globalCard(globalChoice, bots) {
-  const card = el('article', 'card global');
+function globalBar(globalChoice, bots) {
+  const bar = el('div', 'bar-item');
   const sets = openSets._any || [];
-  card.append(el('h2', null, 'Booster à ouvrir · tous les comptes'));
+  const lab = el('label', 'inline');
+  lab.append(el('span', 'k', 'Booster de tous les comptes'));
   const sel = el('select');
   sel.setAttribute('aria-label', 'Booster global');
   const a = el('option', null, 'Auto (meilleur favori)'); a.value = 'auto';
   sel.append(a);
   setOptions(sel, sets);
   sel.value = toValue(globalChoice);
-  const follow = bots.filter((b) => b.booster.choice.mode === 'global').map((b) => b.name);
-  sel.addEventListener('change', () => act(card, () => sendBooster('/api/booster/global', sel.value)));
-  card.append(sel, el('p', 'muted', follow.length ? `Suivent ce réglage : ${follow.join(', ')}` : 'Aucun compte ne suit ce réglage.'));
-  return card;
+  const follow = bots.filter((b) => b.booster.choice.mode === 'global').length;
+  sel.addEventListener('change', () => act(bar, () => sendBooster('/api/booster/global', sel.value)));
+  lab.append(sel);
+  bar.append(lab, el('span', 'muted', `${follow} compte${follow > 1 ? 's' : ''} le suivent`));
+  return bar;
 }
 
 function scriptsBlock(bot, card) {
@@ -116,40 +127,39 @@ function manageBlock(bot, card) {
   return row;
 }
 
-function addCard() {
-  const card = el('article', 'card add');
-  card.append(el('h2', null, 'Ajouter un compte'));
-  const create = el('button', null, 'Créer un compte automatiquement');
-  create.addEventListener('click', () => act(card, async () => {
+function addBar() {
+  const bar = el('div', 'bar-item');
+  const create = el('button', 'primary', 'Créer un compte');
+  create.title = 'Pseudo et mot de passe aléatoires, enregistrés chiffrés dans le panel';
+  create.addEventListener('click', () => act(bar, async () => {
     toast('Création en cours, quelques secondes…');
     const r = await api('POST', '/api/accounts/create');
     toast(`Compte créé : ${r.username}`);
   }));
-  card.append(create, el('p', 'muted', 'Pseudo et mot de passe aléatoires, enregistrés chiffrés dans le panel.'));
-  const det = el('details');
+  const det = el('details', 'inline-form');
   det.append(el('summary', null, 'Ajouter un compte existant'));
   const f = el('form', 'form');
   const u = el('input'); u.placeholder = 'Pseudo'; u.required = true; u.autocomplete = 'off'; u.setAttribute('aria-label', 'Pseudo');
   const p = el('input'); p.type = 'password'; p.placeholder = 'Mot de passe'; p.required = true; p.autocomplete = 'new-password'; p.setAttribute('aria-label', 'Mot de passe');
   const ok = el('button', null, 'Ajouter'); ok.type = 'submit';
   f.append(u, p, ok);
-  f.addEventListener('submit', (e) => { e.preventDefault(); act(card, async () => { await api('POST', '/api/accounts', { username: u.value.trim(), password: p.value }); u.value = ''; p.value = ''; toast('Compte ajouté'); }); });
+  f.addEventListener('submit', (e) => { e.preventDefault(); act(bar, async () => { await api('POST', '/api/accounts', { username: u.value.trim(), password: p.value }); u.value = ''; p.value = ''; toast('Compte ajouté'); }); });
   det.append(f);
-  card.append(det);
-  return card;
+  bar.append(create, det);
+  return bar;
 }
 
 async function accountCard(bot, globalChoice) {
-  const card = el('article', 'card');
+  const card = el('article', bot.disabled ? 'card off' : 'card');
   const head = el('div', 'head');
   const s = bot.status;
   head.append(el('h2', null, (s && s.account && s.account.user) || bot.name));
   head.append(el('span', bot.disabled ? 'pill off' : bot.online ? 'pill ok' : 'pill bad', bot.disabled ? 'Désactivé' : bot.online ? 'En ligne' : 'Hors ligne'));
   card.append(head);
-  if (bot.disabled) { card.append(el('p', 'muted', 'Ce compte ne tourne pas.')); if (manage) card.append(manageBlock(bot, card)); return card; }
+  if (bot.disabled) { card.append(el('p', 'muted', 'Ce compte ne tourne pas.')); if (manage) card.append(fold(bot.name, 'Gérer', manageBlock(bot, card))); return card; }
   if (!s) {
     card.append(el('p', 'muted', bot.error || 'Démarrage en cours…'));
-    if (manage) card.append(manageBlock(bot, card));
+    if (manage) card.append(fold(bot.name, 'Gérer', manageBlock(bot, card)));
     return card;
   }
   if (!bot.online) card.append(el('p', 'muted', bot.error || `Dernier contact : ${ago(bot.lastSeen)}`));
@@ -157,18 +167,23 @@ async function accountCard(bot, globalChoice) {
   const grid = el('div', 'grid');
   if (s.account) {
     grid.append(stat('Pièces', num(s.account.balance)));
-    grid.append(stat('Énergie', `${num(s.account.energy.stock)} / ${num(s.account.energy.max)}`, s.account.energy.stock, s.account.energy.max));
+    grid.append(stat('Énergie', `${num(s.account.energy.stock)}/${num(s.account.energy.max)}`, s.account.energy.stock, s.account.energy.max));
   } else grid.append(stat('Session', 'perdue'));
-  grid.append(stat('Échanges', `${num(s.trades.open)} / ${s.trades.max}`, s.trades.open, s.trades.max));
-  grid.append(stat('En vente', `${num(s.sales.selling)} / ${num(s.sales.max)}`, s.sales.selling, s.sales.max));
+  grid.append(stat('Échanges', `${num(s.trades.open)}/${s.trades.max}`, s.trades.open, s.trades.max));
+  grid.append(stat('Ventes', `${num(s.sales.selling)}/${num(s.sales.max)}`, s.sales.selling, s.sales.max));
   card.append(grid);
+  // Un résumé du booster et des scripts reste visible ; le détail se déplie
+  const on = s.scripts.filter((x) => x.on).length;
+  const choice = bot.booster.choice.mode === 'global' ? 'global' : bot.booster.choice.mode === 'auto' ? 'auto' : 'série fixe';
+  card.append(el('p', 'muted line', `Booster ${choice} · ${on}/${s.scripts.length} scripts${bot.booster.error ? ' · booster non appliqué' : ''}`));
   if (bot.online) {
-    card.append(boosterBlock(bot, card, globalChoice), scriptsBlock(bot, card));
-    const r = el('button', 'ghost', 'Redémarrer le bot');
+    const r = el('button', 'ghost small', 'Redémarrer');
     r.addEventListener('click', () => { if (confirm(`Redémarrer le bot ${bot.name} ?`)) act(card, () => api('POST', `/api/bots/${encodeURIComponent(bot.name)}/restart`).then(() => toast('Redémarrage demandé'))); });
-    card.append(r);
-  }
-  if (manage) card.append(manageBlock(bot, card));
+    const parts = [boosterBlock(bot, card, globalChoice), scriptsBlock(bot, card)];
+    if (manage) parts.push(manageBlock(bot, card));
+    parts.push(r);
+    card.append(fold(bot.name, 'Réglages', ...parts));
+  } else if (manage) card.append(fold(bot.name, 'Gérer', manageBlock(bot, card)));
   return card;
 }
 
@@ -199,7 +214,12 @@ async function refresh(force) {
     if (!openSets._any || !openSets._any.length) { const on = d.bots.find((b) => b.online); if (on) { try { openSets._any = await api('GET', `/api/bots/${encodeURIComponent(on.name)}/sets`); } catch {} } }
     const cards = d.bots.map((b) => accountCard(b, d.booster.global));
     const resolved = await Promise.all(cards);
-    if (!busy) $('accounts').replaceChildren(globalCard(d.booster.global, d.bots), ...resolved, ...(manage ? [addCard()] : []));
+    // Pas de reconstruction pendant qu'un menu ou un champ est utilisé (sinon la liste se referme)
+    const typing = document.activeElement && ($('accounts').contains(document.activeElement) || $('toolbar').contains(document.activeElement)) && /^(SELECT|INPUT)$/.test(document.activeElement.tagName);
+    if (!busy && !typing) {
+      $('toolbar').replaceChildren(globalBar(d.booster.global, d.bots), ...(manage ? [addBar()] : []));
+      $('accounts').replaceChildren(...resolved);
+    }
     const sel = $('logBot');
     if (sel.options.length === 1) for (const b of d.bots) { const o = el('option', null, b.name); o.value = b.name; sel.append(o); }
     $('stamp').textContent = `Mis à jour ${new Date(d.at).toLocaleTimeString('fr-FR')}`;
@@ -216,6 +236,7 @@ async function refreshLogs() {
 for (const b of document.querySelectorAll('.tab')) b.addEventListener('click', () => {
   for (const x of document.querySelectorAll('.tab')) x.classList.toggle('on', x === b);
   $('accounts').hidden = b.dataset.tab !== 'accounts';
+  $('toolbar').hidden = b.dataset.tab !== 'accounts';
   $('logs').hidden = b.dataset.tab !== 'logs';
   refresh(true);
 });

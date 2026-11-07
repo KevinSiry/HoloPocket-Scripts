@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Vendre mes doublons
 // @namespace    kevin.holopocket
-// @version      4.3
+// @version      4.4
 // @description  Marché : met en vente les doublons (prix conseillé, les plus chers d'abord), à la demande ou en mode auto qui remplit les slots dès qu'une place se libère.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -115,8 +115,15 @@
     return keys;
   }
 
+  // Marché refusé (compte récent…) : pas d'insistance, pause mémorisée
+  const PAUSE_KEY = 'hp-sell-paused-until';
+  const pausedUntil = () => { try { return +localStorage.getItem(PAUSE_KEY) || 0; } catch { return 0; } };
+  const pauseSales = (min) => { try { localStorage.setItem(PAUSE_KEY, String(Date.now() + min * 60000)); } catch {} };
+  const RESTRICTED = /nouveau|r[ée]cent|restreint|interdit|bloqu|pas encore|avant de pouvoir|\b24\s*h|^403\b/i;
+
   async function listFill(max, onProgress) {
     const done = [], failed = [];
+    let streak = 0;
     const onSale = await onSaleKeys();
     const reserved = flipReserved();
     const promised = await promisedIds();
@@ -136,9 +143,14 @@
         }
         onSale.add(k);
         done.push({ ...c, price });
+        streak = 0;
       } catch (e) {
         failed.push({ ...c, reason: e.message });
         if (/limite|max|10/i.test(e.message)) break; // plus de place
+        // Marché refusé : 1 h de pause ; deux refus d'affilée pour une autre raison : 15 min
+        streak++;
+        if (RESTRICTED.test(e.message)) { pauseSales(60); break; }
+        if (streak >= 2) { pauseSales(15); break; }
       }
     }
     return { done, failed };
@@ -183,6 +195,7 @@
 
   async function autoTick() {
     if (!autoOn || busy) return; // tourne sur toutes les pages du site
+    if (Date.now() < pausedUntil()) return; // marché refusé récemment : aucun appel
     busy = true;
     try {
       const { free } = await freeSlots();

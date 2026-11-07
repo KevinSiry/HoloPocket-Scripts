@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.10
+// @version      3.11
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord, avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
@@ -40,6 +40,9 @@
     FAVORITES_ONLY: false,   // false : toutes les séries (les favoris restent prioritaires) · true : séries en favori uniquement
     PRIORITY_MAX_CARDS: 10, // échange prioritaire : cartes données par envoi (10 = limite du site)
     PRIORITY_MAX_CHECK: 40, // …et fiches de cartes vérifiées au plus par passage
+    PRIORITY_IDLE_MIN: 5,   // …rien à donner (ou cible fermée) : on ne rescanne pas avant 5 min, pour ménager l'API
+    BLOCK_PAUSE_MIN: 60,    // le site refuse les échanges (compte récent…) : tout est suspendu 1 h
+    FAIL_PAUSE_MIN: 30,     // 3 envois refusés d'affilée, quelle qu'en soit la raison : pause de 30 min
     MAX_OPEN_TRADES: 20, // limite du site : échanges en cours (propositions envoyées en attente)
     // Mode automatique
     AUTO_INTERVAL_MIN: 1,    // un passage toutes les minutes au plus (seulement s'il reste des places)
@@ -49,6 +52,28 @@
   };
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // Pauses mémorisées dans localStorage : elles survivent au rechargement de la page
+  const lsNum = (k) => { try { return +localStorage.getItem(k) || 0; } catch { return 0; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, String(v)); } catch {} };
+  const BLOCKED_KEY = 'hp-trade-blocked-until', PRIORITY_NEXT_KEY = 'hp-priority-next';
+  const isBlocked_ = () => Date.now() < lsNum(BLOCKED_KEY);
+  // Refus du site qui ressemblent à une restriction du compte (compte récent, échanges interdits…)
+  const BLOCK_RE = /nouveau|r[ée]cent|restreint|interdit|bloqu|pas encore|avant de pouvoir|\b24\s*h|^403\b/i;
+  let failStreak = 0, blockToastAt = 0;
+  // Un envoi vient d'échouer : suspend tous les échanges si le site refuse le compte, sans insister
+  function noteSendFailure(e) {
+    failStreak++;
+    const restricted = BLOCK_RE.test(e.message);
+    if (!restricted && failStreak < 3) return false;
+    const min = restricted ? CONFIG.BLOCK_PAUSE_MIN : CONFIG.FAIL_PAUSE_MIN;
+    lsSet(BLOCKED_KEY, Date.now() + min * 60000);
+    failStreak = 0;
+    if (Date.now() - blockToastAt > 30 * 60000) {
+      blockToastAt = Date.now();
+      UI.toast(`<b>Échanges suspendus ${min >= 60 ? '1 h' : `${min} min`}</b> : le site les refuse (${esc(e.message)}). Compte récent ?`, { kind: 'error', ms: 15000 });
+    }
+    return true;
+  }
   // Cartes achetées par le script Achat-revente : il s'occupe lui-même de leur revente
   const flipReserved = () => { try { return new Set(JSON.parse(localStorage.getItem('hp-flip-reserved') || '[]')); } catch { return new Set(); } };
   // Joueurs à ne jamais solliciter (ex. ton autre compte) : localStorage 'hp-excluded-players' = ["pseudo", …]
@@ -515,7 +540,7 @@
   // Envoie les cartes que la cible n'a pas (les plus chères d'abord), sans rien demander en retour.
   // Seul cas où le dernier exemplaire peut partir. Jamais une carte en vente ni déjà promise, hors classeur et hors cartes réservées à la revente.
   // Passe avant la recherche normale ; aucune pause après acceptation ou refus, mais un seul échange ouvert à la fois.
-  let lastPriorityErr = '', priorityWarned = false;
+  let lastPriorityErr = '', priorityWarned = false, priorityErrs = 0;
   async function priorityStep(log) {
     const target = priorityTarget();
     if (!target || !myName || target.toLowerCase() === myName.toLowerCase()) return false;
@@ -526,9 +551,11 @@
     if (log.pendingTo.has(target)) return false;                // un échange est déjà en attente avec lui
     if (log.openSent >= CONFIG.MAX_OPEN_TRADES) return false;   // aucune place libre
     if (!sendGate(log).ok) return false;
+    if (Date.now() < lsNum(PRIORITY_NEXT_KEY)) return false;   // rien à donner la dernière fois, ou erreur : on attend
+    const later = (min) => lsSet(PRIORITY_NEXT_KEY, Date.now() + min * 60000);
     try {
       const acc = await api('GET', `/users/${encodeURIComponent(target)}/trade-access`);
-      if (acc.access !== 'open') return false;
+      if (acc.access !== 'open') { later(CONFIG.PRIORITY_IDLE_MIN); return false; }
       const flipRes = flipReserved();
       const give = list(await api('GET', `/users/${encodeURIComponent(myName)}/cards?notOwnedBy=${encodeURIComponent(target)}`)) // toutes tes cartes, pas seulement les doublons
         .filter((c) => !inBinder(c) && !flipRes.has(key(c)) && (c.userCardIds || []).length)
@@ -543,7 +570,7 @@
         if (info.spare >= 1) ids.push(info.ids[0]);
         await sleep(CONFIG.DELAY / 2);
       }
-      if (!ids.length) return false;
+      if (!ids.length) { later(CONFIG.PRIORITY_IDLE_MIN); return false; }
       await api('POST', '/trades', {
         toUsername: target,
         offeredUserCardIds: ids,
@@ -554,10 +581,13 @@
       savePromised(ids); // les scripts de vente n'y touchent plus
       writeLocal([...readLocal(), { to: target, at: Date.now() }]);
       if (openTrades != null) openTrades++;
-      lastPriorityErr = '';
+      lastPriorityErr = ''; priorityErrs = 0; failStreak = 0; lsSet(PRIORITY_NEXT_KEY, 0);
       UI.toast(`<b>Échange prioritaire</b> : ${ids.length} carte(s) proposée(s) à ${esc(target)}`, { kind: 'success', ms: 12000 });
       return true;
     } catch (e) {
+      priorityErrs++;
+      // Compte refusé par le site : tout est suspendu ; sinon attente croissante (2, 4, 8… 60 min)
+      if (!noteSendFailure(e)) later(Math.min(60, 2 ** priorityErrs));
       if (e.message !== lastPriorityErr) { // une seule alerte par message, pas une par minute
         lastPriorityErr = e.message;
         UI.toast(`Échange prioritaire (${esc(target)}) : ${esc(e.message)}`, { kind: 'error', ms: 12000 });
@@ -890,6 +920,7 @@
 
   async function autoCycle(force) {
     if (!autoOn || busy) return;
+    if (isBlocked_()) return; // le site refuse les échanges pour l'instant : aucun appel
     const last = readAutoLast();
     if (!force && last && Date.now() - last.at < CONFIG.AUTO_INTERVAL_MIN * 60000) return;
     if (!takeLock()) return;
@@ -910,11 +941,12 @@
           if (!autoOn) break;
           try {
             await send(pr);
-            sent++;
+            sent++; failStreak = 0;
             if (openTrades != null) openTrades++;
             autoStatus = `Envoi des propositions… ${sent}`; paint();
           } catch (e) {
             if (/limite de/.test(e.message)) { full = true; break; }
+            if (noteSendFailure(e)) { full = true; break; } // le site refuse le compte : on s'arrête là
           }
           await sleep(CONFIG.AUTO_SEND_DELAY_S * 1000);
         }
@@ -939,6 +971,7 @@
     let sub = 'Désactivés';
     if (autoOn) {
       if (busy && autoStatus) sub = autoStatus;
+      else if (isBlocked_()) sub = `Suspendus par le site · reprise dans ${minsLeft(lsNum(BLOCKED_KEY) - Date.now())}`;
       else {
         const cnt = openTrades != null ? `${openTrades}/${CONFIG.MAX_OPEN_TRADES} en cours` : 'Échanges';
         const next = last ? `prochain dans ${minsLeft(last.at + CONFIG.AUTO_INTERVAL_MIN * 60000 - Date.now())}` : 'démarrage…';

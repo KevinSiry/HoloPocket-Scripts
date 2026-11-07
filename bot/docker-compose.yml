@@ -8,6 +8,7 @@ x-bot: &bot
   logging:
     driver: json-file
     options: { max-size: "10m", max-file: "3" }
+  networks: [internal]       # le panel joint l'API du bot (port 3100) sur ce réseau, jamais publié sur Internet
 
 services:
   compte1:
@@ -23,3 +24,49 @@ services:
     env_file: .env.compte2
     volumes:
       - ./data/compte2:/app/profile
+
+  # Panel de gestion : une seule adresse pour voir et régler tous les comptes.
+  # Lancer avec : docker compose --env-file .env.panel up -d --build
+  panel:
+    build: ../panel
+    image: holopocket-panel
+    container_name: holopocket-panel
+    restart: unless-stopped
+    init: true
+    env_file: .env.panel
+    environment:
+      PANEL_TRUST_PROXY: "1"      # derrière Traefik : l'adresse du visiteur vient de X-Forwarded-For
+    depends_on: [compte1, compte2]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    networks: [internal, proxy]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      # HTTP -> HTTPS
+      - "traefik.http.routers.hp-panel.rule=Host(`${PANEL_DOMAIN}`)"
+      - "traefik.http.routers.hp-panel.entrypoints=web"
+      - "traefik.http.routers.hp-panel.middlewares=hp-panel-https"
+      - "traefik.http.middlewares.hp-panel-https.redirectscheme.scheme=https"
+      # HTTPS + certificat Let's Encrypt
+      - "traefik.http.routers.hp-panel-secure.rule=Host(`${PANEL_DOMAIN}`)"
+      - "traefik.http.routers.hp-panel-secure.entrypoints=websecure"
+      - "traefik.http.routers.hp-panel-secure.tls=true"
+      - "traefik.http.routers.hp-panel-secure.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.hp-panel-secure.middlewares=hp-panel-headers,hp-panel-ratelimit"
+      - "traefik.http.routers.hp-panel-secure.service=hp-panel-svc"
+      - "traefik.http.services.hp-panel-svc.loadbalancer.server.port=8080"
+      - "traefik.http.middlewares.hp-panel-headers.headers.stsSeconds=31536000"
+      - "traefik.http.middlewares.hp-panel-headers.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.hp-panel-headers.headers.frameDeny=true"
+      - "traefik.http.middlewares.hp-panel-headers.headers.referrerPolicy=no-referrer"
+      - "traefik.http.middlewares.hp-panel-headers.headers.customResponseHeaders.Server="
+      - "traefik.http.middlewares.hp-panel-ratelimit.ratelimit.average=20"
+      - "traefik.http.middlewares.hp-panel-ratelimit.ratelimit.period=1s"
+      - "traefik.http.middlewares.hp-panel-ratelimit.ratelimit.burst=60"
+
+networks:
+  internal:
+  proxy:
+    external: true   # réseau de Traefik, déjà créé sur le VPS (même nom que pour Kroniq)

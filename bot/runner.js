@@ -6,6 +6,10 @@
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
+const pc = require('./panel-config');
+const { createLogBuffer } = require('./log-buffer');
+const { createGlue } = require('./panel-glue');
+const { createPanelServer } = require('./panel-api');
 
 const DIR = __dirname;
 const env = process.env;
@@ -38,21 +42,41 @@ const cfg = {
   defaultBooster: env.HP_DEFAULT_BOOSTER || file.defaultBooster || '',
   priorityTarget: (env.HP_PRIORITY_TARGET || file.priorityTarget || '').trim(),
 };
-// Interrupteurs des modes auto : activés pour chaque script chargé
-cfg.toggles = file.toggles || Object.fromEntries(cfg.scripts.filter((n) => TOGGLE_OF[n]).map((n) => [TOGGLE_OF[n], '1']));
-// Joueurs exclus : aucun échange, aucun achat (ex. ton autre compte)
-cfg.toggles['hp-excluded-players'] = JSON.stringify(cfg.exclude);
-// Booster ouvert quand le compte n'a aucune série en favori
-cfg.toggles['hp-booster-default'] = cfg.defaultBooster;
-// Joueur prioritaire : le script d'échanges lui donne tes doublons qu'il n'a pas, avant toute autre recherche
-cfg.toggles['hp-priority-target'] = cfg.priorityTarget;
+// Réglages faits depuis le panel (booster, scripts) : ils passent avant le .env
+const baseScripts = [...cfg.scripts];
+const PANEL_FILE = path.join(DIR, 'profile', 'panel-config.json');
+const state = { panelCfg: pc.readConfig(PANEL_FILE) };
+cfg.scripts = pc.applyScripts(baseScripts, state.panelCfg.scripts);
+function buildToggles() {
+  // Interrupteurs des modes auto : activés pour chaque script chargé
+  const t = file.toggles ? { ...file.toggles } : Object.fromEntries(cfg.scripts.filter((n) => TOGGLE_OF[n]).map((n) => [TOGGLE_OF[n], '1']));
+  // Les scripts ajoutés depuis le panel ont aussi leur interrupteur
+  for (const n of cfg.scripts) if (TOGGLE_OF[n]) t[TOGGLE_OF[n]] = '1';
+  // Joueurs exclus : aucun échange, aucun achat (ex. ton autre compte)
+  t['hp-excluded-players'] = JSON.stringify(cfg.exclude);
+  // Booster ouvert quand le compte n'a aucune série en favori
+  t['hp-booster-default'] = cfg.defaultBooster;
+  // Joueur prioritaire : le script d'échanges lui donne tes doublons qu'il n'a pas, avant toute autre recherche
+  t['hp-priority-target'] = cfg.priorityTarget;
+  // Série imposée depuis le panel (vide = meilleur favori)
+  t['hp-booster-force'] = state.panelCfg.booster.mode === 'fixed' ? state.panelCfg.booster.setId : '';
+  return t;
+}
+cfg.toggles = buildToggles();
 
-const log = (...a) => console.log(new Date().toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }), '·', ...a);
+const logs = createLogBuffer(500);
+const BAD = /impossible|refusée|plantée|Arrêt|Erreur page|expirée|absente/i;
+const logL = (level, ...a) => {
+  console.log(new Date().toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }), '·', ...a);
+  logs.push(level, a.map(String).join(' '));
+};
+const log = (...a) => logL(BAD.test(a.join(' ')) ? 'warn' : 'info', ...a);
+const startedAt = Date.now();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function fetchScripts() {
+async function fetchScripts(names = cfg.scripts) {
   const out = [];
-  for (const name of cfg.scripts) {
+  for (const name of names) {
     const r = await fetch(cfg.raw + name + '?t=' + Date.now(), { cache: 'no-store' });
     if (!r.ok) throw new Error(`${name} : HTTP ${r.status}`);
     const code = await r.text();
@@ -83,7 +107,8 @@ function parseCookie(header) {
   });
   if (cfg.cookie) await ctx.addCookies(parseCookie(cfg.cookie));
   // Active les interrupteurs voulus avant que les scripts ne démarrent
-  await ctx.addInitScript((t) => { try { for (const [k, v] of Object.entries(t)) localStorage.setItem(k, v); } catch {} }, cfg.toggles);
+  const setLS = (t) => { try { for (const [k, v] of Object.entries(t)) localStorage.setItem(k, v); } catch {} };
+  await ctx.addInitScript(setLS, cfg.toggles);
 
   let scripts = await fetchScripts();
   log('Scripts :', sig(scripts));
@@ -141,13 +166,29 @@ function parseCookie(header) {
   log(`Compte ${a.user} · ${a.balance} pièces`);
   await load(); // les scripts démarrent une fois la session valide
 
+  // API du panel de gestion (réseau Docker interne uniquement, protégée par PANEL_TOKEN)
+  if (env.PANEL_TOKEN) {
+    const glue = createGlue({
+      page, ctx, cfg, state, file: PANEL_FILE, baseScripts, buildToggles, setLS,
+      getScripts: () => scripts, setScripts: (l) => { scripts = l; },
+      fetchScripts, load, logs, log, name: env.HP_BOT_NAME || a.user, startedAt,
+    });
+    const port = +(env.HP_PANEL_PORT || 3100);
+    createPanelServer({
+      token: env.PANEL_TOKEN, logs, status: glue.status, sets: glue.sets, applyConfig: glue.applyConfig,
+      restart: () => { log('Redémarrage demandé depuis le panel'); process.exit(0); },
+    }).listen(port, '0.0.0.0', () => log(`API du panel à l’écoute sur le port ${port}`));
+  }
+
   // Messages des scripts (toasts) recopiés dans le journal
   setInterval(async () => {
     const t = await page.evaluate(() => {
       window.__seen = window.__seen || new Set();
-      return [...document.querySelectorAll('.hp-toast')].map((x) => x.textContent.trim()).filter((x) => x && !window.__seen.has(x) && window.__seen.add(x));
+      return [...document.querySelectorAll('.hp-toast')]
+        .map((x) => ({ text: x.textContent.trim(), error: x.classList.contains('hp-toast--error') }))
+        .filter((x) => x.text && !window.__seen.has(x.text) && window.__seen.add(x.text));
     }).catch(() => []);
-    for (const x of t) log('›', x.replace(/\s+/g, ' ').slice(0, 300));
+    for (const x of t) logL(x.error ? 'error' : 'info', '›', x.text.replace(/\s+/g, ' ').slice(0, 300));
   }, 5000);
 
   // Session toujours valide ? Sinon reconnexion puis rechargement des scripts

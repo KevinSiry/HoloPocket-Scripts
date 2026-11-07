@@ -1,0 +1,8 @@
+{
+  "name": "holopocket-panel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Panel de gestion centralisé des comptes HoloPocket (aucune dépendance)",
+  "main": "server.js",
+  "scripts": { "start": "node server.js", "test": "node --test test/auth.test.js test/alerts.test.js test/bots.test.js test/server.test.js" }
+}

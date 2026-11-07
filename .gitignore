@@ -1,0 +1,3 @@
+# Réglages du panel (secrets) : jamais dans git
+.env.panel
+panel/node_modules/

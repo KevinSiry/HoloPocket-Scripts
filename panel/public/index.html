@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>HoloPocket · Panel</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>HoloPocket</h1>
+  <nav>
+    <button data-tab="accounts" class="tab on">Comptes</button>
+    <button data-tab="logs" class="tab">Journal</button>
+  </nav>
+  <button id="logout" class="ghost">Déconnexion</button>
+</header>
+<section id="alerts" aria-live="polite"></section>
+<main>
+  <section id="accounts"></section>
+  <section id="logs" hidden>
+    <div class="bar">
+      <select id="logBot" aria-label="Compte"><option value="">Tous les comptes</option></select>
+      <label><input type="checkbox" id="logWarn"> Alertes seulement</label>
+    </div>
+    <ol id="logList"></ol>
+  </section>
+</main>
+<p id="stamp" class="muted"></p>
+<script src="/app.js"></script>
+</body>
+</html>

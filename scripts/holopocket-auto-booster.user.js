@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         HoloPocket – Ouverture auto quand l'énergie est pleine
 // @namespace    kevin.holopocket
-// @version      2.1
+// @version      2.2
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-auto-booster.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-auto-booster.user.js
-// @description  Surveille l'énergie en arrière-plan. Dès qu'elle atteint le plafond, ouvre 1 booster de la série favorite qui a le plus de chance de donner une nouvelle carte.
+// @description  Surveille l'énergie en arrière-plan. Dès qu'elle atteint le plafond, ouvre 1 booster de la série favorite qui a le plus de chance de donner une nouvelle carte (ou d'une série fixe choisie dans le panel).
 // @match        https://holopocket.fr/*
 // @grant        none
 // @run-at       document-idle
@@ -63,18 +63,33 @@
     return 1 - none;
   }
 
+  const norm = (x) => String(x || '').trim().toLowerCase();
+  // Série désignée par son identifiant ou son nom (nom exact, sinon nom qui contient le texte)
+  function matchSets(all, wanted) {
+    const w = norm(wanted);
+    let found = all.filter((s) => norm(s.id) === w || norm(s.name) === w);
+    if (!found.length) found = all.filter((s) => norm(s.name).includes(w)).slice(0, 1);
+    return found;
+  }
+  const readLS = (k) => { try { return (localStorage.getItem(k) || '').trim(); } catch { return ''; } };
+
   async function pickBestSet() {
     const all = await api('GET', '/sets');
-    let sets = all.filter((s) => !s.promo && s.favorite);
-    // Aucun favori : booster par défaut (localStorage 'hp-booster-default' = id ou nom de la série)
-    if (!sets.length) {
-      let def = '';
-      try { def = (localStorage.getItem('hp-booster-default') || '').trim().toLowerCase(); } catch {}
-      if (!def) return null;
-      const norm = (x) => String(x || '').trim().toLowerCase();
-      sets = all.filter((s) => norm(s.id) === def || norm(s.name) === def);
-      if (!sets.length) sets = all.filter((s) => norm(s.name).includes(def)).slice(0, 1);
-      if (!sets.length) throw new Error(`Booster par défaut « ${def} » introuvable`);
+    // Série fixe (réglée depuis le panel : localStorage 'hp-booster-force' = id ou nom) : toujours cette série
+    const force = readLS('hp-booster-force');
+    let sets;
+    if (force) {
+      sets = matchSets(all, force);
+      if (!sets.length) throw new Error(`Série fixe « ${force} » introuvable`);
+    } else {
+      sets = all.filter((s) => !s.promo && s.favorite);
+      // Aucun favori : booster par défaut (localStorage 'hp-booster-default' = id ou nom de la série)
+      if (!sets.length) {
+        const def = readLS('hp-booster-default');
+        if (!def) return null;
+        sets = matchSets(all, def);
+        if (!sets.length) throw new Error(`Booster par défaut « ${def} » introuvable`);
+      }
     }
     const rows = await Promise.all(sets.map(async (s) => {
       const id = encodeURIComponent(s.id);

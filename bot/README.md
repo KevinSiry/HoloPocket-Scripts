@@ -46,9 +46,30 @@ git pull && docker compose up -d --build    # mettre à jour le bot lui-même (l
 | `HP_DEFAULT_BOOSTER` | série ouverte par l'auto-booster si le compte n'a aucun favori (nom ou identifiant, ex. `Nuit Noire` ou `me05`) |
 | `HP_CHECK_UPDATES_MIN` | délai de vérification des nouvelles versions (15 par défaut) |
 | `HP_RELOAD_EVERY_H` | rechargement complet de la page (6 par défaut) |
+| `PANEL_TOKEN` | jeton partagé avec le panel (active l'API du bot) ; `HP_BOT_NAME` (nom affiché, par défaut le pseudo) et `HP_PANEL_PORT` (3100) sont optionnels |
 | `HP_COOKIE` | variante sans mot de passe (compte Discord) : en-tête Cookie copié depuis le navigateur ; à recopier quand il expire |
 
 Le mode auto de chaque script listé est activé automatiquement.
+
+## Panel de gestion (tous les comptes au même endroit)
+
+Un petit site protégé par mot de passe : vue d'ensemble des comptes (pièces, énergie, échanges n/20, ventes, bot en ligne),
+choix du booster à ouvrir (Auto ou une série fixe), scripts activables/coupables par compte, journal et alertes.
+Les réglages faits depuis le panel sont conservés (`data/<compte>/panel-config.json`) et passent avant le `.env`.
+
+```bash
+cd HoloPocket-Scripts
+node panel/hash-password.js                 # donne PANEL_PASSWORD_HASH
+openssl rand -hex 32                         # une fois pour PANEL_SECRET, une fois pour PANEL_TOKEN
+cp panel/.env.panel.example bot/.env.panel   # puis remplir (sous-domaine, hash, secret, jeton)
+chmod 600 bot/.env.panel
+echo "PANEL_TOKEN=<le même jeton>" >> bot/.env.compte1   # idem .env.compte2
+cd bot && git pull && docker compose --env-file .env.panel up -d --build
+```
+
+Prérequis : un enregistrement DNS `A` du sous-domaine (`PANEL_DOMAIN`) vers le VPS, et le réseau Docker `proxy` de Traefik (comme Kroniq).
+Chaque bot expose son API (port 3100) uniquement sur le réseau Docker interne, protégée par `PANEL_TOKEN` ; sans `PANEL_TOKEN`, l'API reste éteinte.
+Un compte ajouté dans `docker-compose.yml` doit aussi être ajouté à `PANEL_BOTS`. Sans Traefik, ne lance pas le service `panel` (`docker compose up -d compte1 compte2`).
 
 ## À savoir
 

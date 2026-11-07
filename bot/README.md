@@ -12,11 +12,13 @@ Prérequis : Docker et Docker Compose sur le serveur (`docker compose version` d
 git clone https://github.com/KevinSiry/HoloPocket-Scripts.git
 cd HoloPocket-Scripts/bot
 
+cp .env.shared.example .env.shared
+nano .env.shared         # HP_ACCOUNTS (tous tes pseudos), HP_PRIORITY_TARGET, HP_SCRIPTS… communs à tous les comptes
 cp .env.example .env.compte1
 cp .env.example .env.compte2
-nano .env.compte1        # HP_USERNAME / HP_PASSWORD du compte 1, HP_EXCLUDE = pseudo du compte 2
-nano .env.compte2        # HP_USERNAME / HP_PASSWORD du compte 2, HP_EXCLUDE = pseudo du compte 1
-chmod 600 .env.compte*
+nano .env.compte1        # HP_USERNAME / HP_PASSWORD du compte 1 (rien d'autre à mettre)
+nano .env.compte2        # HP_USERNAME / HP_PASSWORD du compte 2
+chmod 600 .env.shared .env.compte*
 
 docker compose up -d --build
 docker compose logs -f   # chaque compte doit afficher « Connecté en tant que … » puis « Page chargée, scripts injectés »
@@ -35,12 +37,21 @@ docker compose down                         # tout arrêter
 git pull && docker compose up -d --build    # mettre à jour le bot lui-même (les scripts se mettent à jour seuls)
 ```
 
-## Réglages (`.env.<compte>`)
+## Plusieurs comptes sans les configurer un par un
+
+- `.env.shared` : réglages communs à tous les comptes (liste des comptes, cible prioritaire, scripts, jeton du panel).
+- `.env.compteN` : seulement `HP_USERNAME` et `HP_PASSWORD` du compte. Une variable écrite ici passe avant `.env.shared`.
+- `HP_ACCOUNTS` : les pseudos de tous tes comptes. Chacun ignore automatiquement les autres (aucun échange, aucune enchère entre eux), sans `HP_EXCLUDE`.
+- `HP_PRIORITY_TARGET` : le compte qui reçoit les dons des autres. Il reste exclu des échanges normaux ; il ne se donne rien à lui-même (rien à retirer dans son fichier).
+- Ajouter un compte : un bloc dans `docker-compose.yml`, un `.env.compteN`, son pseudo dans `HP_ACCOUNTS`, et son adresse dans `PANEL_BOTS`.
+
+## Réglages (`.env.shared` ou `.env.<compte>`)
 
 | Variable | Rôle |
 |---|---|
 | `HP_USERNAME`, `HP_PASSWORD` | identifiants HoloPocket |
-| `HP_EXCLUDE` | pseudos à ne jamais solliciter : aucun échange, aucune enchère sur leurs ventes. Mets-y tes autres comptes pour qu'ils restent indépendants |
+| `HP_ACCOUNTS` | pseudos de tous tes comptes : chacun ignore les autres automatiquement |
+| `HP_EXCLUDE` | pseudos à ne jamais solliciter en plus : aucun échange, aucune enchère sur leurs ventes. Mets-y tes autres comptes pour qu'ils restent indépendants |
 | `HP_PRIORITY_TARGET` | pseudo d'un joueur à servir en priorité : à chaque passage (toutes les minutes), avant la recherche normale, le script `echanges` lui propose en don toutes tes cartes qu'il n'a pas, même en un seul exemplaire (jamais une carte en vente, hors classeur et cartes réservées à la revente ; 10 cartes max par échange, les plus chères d'abord, rien demandé en retour). Pour tous les autres échanges, le dernier exemplaire d'une carte n'est jamais donné. Un seul échange ouvert à la fois avec lui, sans pause après acceptation ou refus. Si tu l'as mis dans `HP_EXCLUDE`, la priorité l'emporte |
 | `HP_SCRIPTS` | scripts à faire tourner (par défaut `auto-booster,echanges`) ; disponibles : `auto-booster, echanges, vendre-doublons, recyclage, achat-revente` |
 | `HP_DEFAULT_BOOSTER` | série ouverte par l'auto-booster si le compte n'a aucun favori (nom ou identifiant, ex. `Nuit Noire` ou `me05`) |

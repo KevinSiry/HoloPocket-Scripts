@@ -14,21 +14,21 @@ services:
   compte1:
     <<: *bot
     container_name: holopocket-compte1
-    env_file: .env.compte1
+    env_file: [.env.shared, .env.compte1]   # réglages communs, puis identifiants du compte
     volumes:
       - ./data/compte1:/app/profile
 
   compte2:
     <<: *bot
     container_name: holopocket-compte2
-    env_file: .env.compte2
+    env_file: [.env.shared, .env.compte2]   # réglages communs, puis identifiants du compte
     volumes:
       - ./data/compte2:/app/profile
 
   compte3:
     <<: *bot
     container_name: holopocket-compte3
-    env_file: .env.compte3
+    env_file: [.env.shared, .env.compte3]   # réglages communs, puis identifiants du compte
     volumes:
       - ./data/compte3:/app/profile
 

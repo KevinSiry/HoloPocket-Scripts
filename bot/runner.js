@@ -8,6 +8,7 @@ const path = require('path');
 const { chromium } = require('playwright');
 const pc = require('./panel-config');
 const { createLogBuffer } = require('./log-buffer');
+const { resolveAccounts } = require('./accounts');
 const { createGlue } = require('./panel-glue');
 const { createPanelServer } = require('./panel-api');
 
@@ -42,6 +43,13 @@ const cfg = {
   defaultBooster: env.HP_DEFAULT_BOOSTER || file.defaultBooster || '',
   priorityTarget: (env.HP_PRIORITY_TARGET || file.priorityTarget || '').trim(),
 };
+// Comptes du même propriétaire : ils s'ignorent entre eux ; HP_PRIORITY_TARGET = celui qui reçoit les dons des autres
+{
+  const r = resolveAccounts({ username: cfg.username, accounts: list(env.HP_ACCOUNTS), exclude: cfg.exclude, priorityTarget: cfg.priorityTarget });
+  cfg.exclude = r.exclude;
+  cfg.priorityTarget = r.priorityTarget;
+  cfg.isPriorityTarget = r.isTarget;
+}
 // Réglages faits depuis le panel (booster, scripts) : ils passent avant le .env
 const baseScripts = [...cfg.scripts];
 const PANEL_FILE = path.join(DIR, 'profile', 'panel-config.json');
@@ -115,6 +123,7 @@ function parseCookie(header) {
   if (cfg.exclude.length) log('Joueurs exclus :', cfg.exclude.join(', '));
   if (cfg.defaultBooster) log('Booster par défaut (sans favori) :', cfg.defaultBooster);
   if (cfg.priorityTarget) log('Échange prioritaire vers :', cfg.priorityTarget);
+  if (cfg.isPriorityTarget) log('Ce compte est la cible prioritaire des autres comptes');
   const page = ctx.pages()[0] || await ctx.newPage();
   page.on('pageerror', (e) => log('Erreur page :', e.message));
   page.on('crash', () => { log('Page plantée, redémarrage'); process.exit(1); });

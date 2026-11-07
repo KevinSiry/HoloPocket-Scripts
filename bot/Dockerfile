@@ -4,7 +4,7 @@ FROM mcr.microsoft.com/playwright:v1.48.2-jammy
 WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev && npm cache clean --force
-COPY runner.js panel-config.js panel-api.js panel-glue.js log-buffer.js ./
+COPY runner.js panel-config.js panel-api.js panel-glue.js log-buffer.js accounts.js ./
 
 ENV NODE_ENV=production
 # Mémoire des scripts et session du navigateur

@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const auth = require('./lib/auth');
 const { parseBots, createBots } = require('./lib/bots');
-const { computeAlerts } = require('./lib/alerts');
+const { computeAlerts, createAlertTracker } = require('./lib/alerts');
 const { createStore, createReconciler } = require('./lib/booster');
 const { createVault } = require('./lib/vault');
 const { createAccountStore } = require('./lib/accounts');
@@ -28,6 +28,7 @@ function createApp(opts) {
   const createGapMs = opts.createGapMs ?? 30000; // une création de compte à la fois, 30 s d'écart au minimum
   let creating = false; let lastCreateAt = 0;
   const store = opts.store || createStore(null);
+  const tracker = createAlertTracker();
   const rec = opts.reconciler || createReconciler({ store, push: (n, p) => bots.config(n, p) });
   const throttle = opts.throttle || auth.createThrottle({ now });
   const send = (res, status, body, type = 'application/json; charset=utf-8', extra = {}) => {
@@ -99,8 +100,15 @@ function createApp(opts) {
           booster: { global: store.global() },
           manage: !!accounts,
           bots: out,
-          alerts: computeAlerts(list.filter((b) => b.online || b.lastSeen != null || accounts), now()),
+          alerts: tracker.apply(computeAlerts(list.filter((b) => b.online || b.lastSeen != null || accounts), now()), now()),
         });
+      }
+      if (req.method === 'POST' && p === '/api/alerts/dismiss') {
+        let body; try { body = JSON.parse(await readBody(req)); } catch (e) { if (e.status) throw e; return send(res, 400, { error: 'JSON invalide' }); }
+        if (body && body.all) tracker.dismissAll(Array.isArray(body.keys) ? body.keys : []);
+        else if (body && typeof body.key === 'string') tracker.dismiss(body.key);
+        else return send(res, 400, { error: 'alerte inconnue' });
+        return send(res, 200, { ok: true });
       }
       if (req.method === 'GET' && p === '/api/logs') {
         const name = url.searchParams.get('bot');

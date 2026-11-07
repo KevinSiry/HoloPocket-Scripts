@@ -29,4 +29,33 @@ function computeAlerts(bots, now = Date.now()) {
   return out;
 }
 
-module.exports = { computeAlerts };
+// Suivi dans le temps : un avertissement s'efface seul après WARN_TTL (il revient si le problème
+// disparaît puis réapparaît), une erreur reste tant qu'elle dure, et chacune peut être fermée à la main
+// (fermée = masquée tant que le problème persiste ; si il disparaît, la fermeture est oubliée).
+const WARN_TTL = 60 * MIN;
+
+function createAlertTracker() {
+  const seen = new Map();      // clé → première apparition
+  const dismissed = new Set();
+  const keyOf = (a) => `${a.bot}|${a.code}`;
+  return {
+    apply(alerts, now = Date.now()) {
+      const live = new Set(alerts.map(keyOf));
+      for (const k of seen.keys()) if (!live.has(k)) seen.delete(k);
+      for (const k of dismissed) if (!live.has(k)) dismissed.delete(k);
+      const out = [];
+      for (const a of alerts) {
+        const k = keyOf(a);
+        if (!seen.has(k)) seen.set(k, now);
+        if (dismissed.has(k)) continue;
+        if (a.level === 'warn' && now - seen.get(k) > WARN_TTL) continue;
+        out.push({ ...a, key: k, since: new Date(seen.get(k)).toISOString() });
+      }
+      return out;
+    },
+    dismiss(key) { dismissed.add(String(key)); },
+    dismissAll(keys) { for (const k of keys) dismissed.add(String(k)); },
+  };
+}
+
+module.exports = { computeAlerts, createAlertTracker, WARN_TTL };

@@ -42,3 +42,17 @@ test('erreur de script dans les 15 dernières minutes', () => {
   assert.deepStrictEqual(codes(bot({ logs: [{ level: 'error', at: iso(20 * 60000), text: 'vieux' }] })), []);
   assert.deepStrictEqual(codes(bot({ logs: [{ level: 'warn', at: iso(1000), text: 'x' }] })), []);
 });
+
+const { createAlertTracker, WARN_TTL } = require('../lib/alerts');
+test('un avertissement s’efface seul, une erreur reste, la fermeture est oubliée quand le problème cesse', () => {
+  const t = createAlertTracker();
+  const w = { bot: 'a', level: 'warn', code: 'x', text: 't' }, e = { bot: 'a', level: 'error', code: 'y', text: 't' };
+  assert.equal(t.apply([w, e], 0).length, 2);
+  const late = WARN_TTL + 1;
+  assert.deepEqual(t.apply([w, e], late).map((a) => a.code), ['y']);
+  t.dismiss('a|y');
+  assert.equal(t.apply([w, e], late + 1).length, 0);
+  assert.equal(t.apply([], late + 2).length, 0);
+  assert.equal(t.apply([e], late + 3).length, 1);   // revenu après avoir cessé : réaffiché
+  assert.equal(t.apply([w], late + 4).length, 1);   // l'horloge de l'avertissement repart
+});

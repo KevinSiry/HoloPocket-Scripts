@@ -204,7 +204,20 @@ async function accountCard(bot, globalChoice) {
 function renderAlerts(alerts) {
   const box = $('alerts');
   box.replaceChildren();
-  for (const a of alerts) box.append(el('div', `alert ${a.level}`, `${a.bot} · ${a.text}`));
+  for (const a of alerts) {
+    const row = el('div', `alert ${a.level}`);
+    const x = el('button', 'alert-x', '×');
+    x.type = 'button'; x.title = 'Fermer'; x.setAttribute('aria-label', 'Fermer cette alerte');
+    x.addEventListener('click', () => { row.remove(); api('POST', '/api/alerts/dismiss', { key: a.key }).catch(() => {}); });
+    row.append(el('span', null, `${a.bot} · ${a.text}`), x);
+    box.append(row);
+  }
+  if (alerts.length > 1) {
+    const all = el('button', 'link', 'Tout fermer');
+    all.type = 'button';
+    all.addEventListener('click', () => { box.replaceChildren(); api('POST', '/api/alerts/dismiss', { all: true, keys: alerts.map((a) => a.key) }).catch(() => {}); });
+    box.append(all);
+  }
 }
 
 function renderLogs(lines) {

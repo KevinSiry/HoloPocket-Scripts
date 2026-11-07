@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Vendre mes doublons
 // @namespace    kevin.holopocket
-// @version      4.4
+// @version      4.5
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-vendre-doublons.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-vendre-doublons.user.js
 // @description  Marché : met en vente les doublons (prix conseillé, les plus chers d'abord), à la demande ou en mode auto qui remplit les slots dès qu'une place se libère.
@@ -412,7 +412,11 @@
     if (Date.now() < pausedUntil()) return; // marché refusé récemment : aucun appel
     busy = true;
     try {
-      const { free } = await freeSlots();
+      const { free: slots } = await freeSlots();
+      // Achat-revente attend des places pour revendre ses cartes : on les lui laisse (valable 5 min après son dernier passage)
+      let need = 0;
+      try { const w = JSON.parse(localStorage.getItem('hp-flip-wait') || 'null'); if (w && Date.now() - w.at < 5 * 60000) need = w.n || 0; } catch {}
+      const free = Math.max(0, slots - need);
       if (free > 0) {
         const { done } = await listFill(free);
         if (done.length) toast(`<b>Auto-vente</b> : ${done.length} doublon(s) mis en vente<br>${done.map((c) => `• ${line(c)} — ${c.price}`).join('<br>')}`, 8000);

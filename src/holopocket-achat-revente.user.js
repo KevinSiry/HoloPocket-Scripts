@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Achat-revente intelligent
 // @namespace    kevin.holopocket
-// @version      1.5
+// @version      1.6
 // @description  Mode auto : enchérit sur les ventes qui se terminent dans moins de 5 min quand la carte part bien en dessous de sa valeur réelle, garde les cartes qui manquaient à ta collection et remet les autres en vente avec une marge.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -74,6 +74,8 @@
       S.log = S.log.slice(-60);
       localStorage.setItem(STATE_KEY, JSON.stringify(S));
       localStorage.setItem(RESERVED_KEY, JSON.stringify(S.holdings.map((h) => h.key)));
+      // Places de marché dont j'ai besoin pour revendre : le script Vente les laisse libres
+      localStorage.setItem('hp-flip-wait', JSON.stringify({ n: S.holdings.filter((h) => !h.auctionId).length, at: Date.now() }));
     } catch {}
   }
   const note = (text) => { S.log.push({ at: Date.now(), text }); };

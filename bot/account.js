@@ -37,7 +37,8 @@ function buildConfig({ env, file = {}, username, password, cookie, allAccounts }
   };
   cfg.baseExclude = [...cfg.exclude];
   cfg.rawPriority = cfg.priorityTarget;
-  applyAccounts(cfg, [...list(env.HP_ACCOUNTS), ...(allAccounts || [])]);
+  cfg.envAccounts = list(env.HP_ACCOUNTS);
+  applyAccounts(cfg, [...cfg.envAccounts, ...(allAccounts || [])]);
   return cfg;
 }
 // Comptes du même propriétaire : ils s'ignorent entre eux ; la cible prioritaire reçoit les dons des autres
@@ -217,7 +218,7 @@ async function startAccount(opts) {
       // La liste des comptes a changé : réécrit les exclusions et recharge la page seulement si elles ont bougé
       async refreshAccounts(accounts) {
         const before = JSON.stringify(cfg.exclude) + cfg.priorityTarget;
-        applyAccounts(cfg, accounts);
+        applyAccounts(cfg, [...(cfg.envAccounts || []), ...accounts]);
         if (JSON.stringify(cfg.exclude) + cfg.priorityTarget === before) return false;
         log('Comptes mis à jour, joueurs exclus :', cfg.exclude.join(', ') || 'aucun');
         await glue.refreshToggles({ reload: true });

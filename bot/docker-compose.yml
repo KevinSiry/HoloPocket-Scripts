@@ -25,6 +25,13 @@ services:
     volumes:
       - ./data/compte2:/app/profile
 
+  compte3:
+    <<: *bot
+    container_name: holopocket-compte3
+    env_file: .env.compte3
+    volumes:
+      - ./data/compte3:/app/profile
+
   # Panel de gestion : une seule adresse pour voir et régler tous les comptes.
   # Lancer avec : docker compose --env-file .env.panel up -d --build
   panel:
@@ -36,7 +43,7 @@ services:
     env_file: .env.panel
     environment:
       PANEL_TRUST_PROXY: "1"      # derrière Traefik : l'adresse du visiteur vient de X-Forwarded-For
-    depends_on: [compte1, compte2]
+    depends_on: [compte1, compte2, compte3]
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }

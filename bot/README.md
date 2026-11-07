@@ -22,7 +22,7 @@ docker compose up -d --build
 docker compose logs -f   # chaque compte doit afficher « Connecté en tant que … » puis « Page chargée, scripts injectés »
 ```
 
-Un seul compte ? Supprime le bloc `compte2` de `docker-compose.yml` (ou lance `docker compose up -d compte1`).
+Un seul compte ? Supprime le bloc `compte2` de `docker-compose.yml` (ou lance `docker compose up -d compte1`) ; de même pour `compte3`.
 
 ## Au quotidien
 

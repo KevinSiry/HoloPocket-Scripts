@@ -3,6 +3,22 @@
 const pc = require('./panel-config');
 
 const TRADES_MAX = 20; // limite du site : échanges envoyés en attente
+// Résumé du suivi du script Achat-revente (son état est dans le navigateur du compte)
+function flipSummary(f, beat) {
+  if (!f && !beat) return null;
+  f = f || {};
+  const hold = Array.isArray(f.holdings) ? f.holdings : [];
+  const st = f.stats || {};
+  return {
+    lastPassAt: beat && beat.at ? new Date(beat.at).toISOString() : null,
+    error: (beat && beat.err) || null,
+    bids: f.tracked ? Object.keys(f.tracked).length : 0,
+    toResell: hold.length,
+    waiting: hold.filter((h) => !h.auctionId).length,
+    bought: st.bought || 0, sold: st.sold || 0, profit: (st.revenue || 0) - (st.soldCost || 0),
+    log: (Array.isArray(f.log) ? f.log : []).slice(-6).map((l) => ({ at: l.at ? new Date(l.at).toISOString() : null, text: String(l.text || '').slice(0, 200) })),
+  };
+}
 const arr = (x) => (Array.isArray(x) ? x : (x && (x.entries || x.cards)) || []);
 
 // Exécuté DANS la page : lit les données du compte via l'API du site
@@ -10,8 +26,9 @@ function readSiteState() {
   const j = async (p) => {
     try { const r = await fetch('/api' + p, { credentials: 'same-origin' }); return r.ok ? await r.json() : null; } catch { return null; }
   };
+  const ls = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } };
   return Promise.all([j('/me'), j('/trades/sent'), j('/market/counts'), j('/sets')])
-    .then(([me, sent, counts, sets]) => ({ me, sent, counts, sets }));
+    .then(([me, sent, counts, sets]) => ({ me, sent, counts, sets, flip: ls('hp-flip-state'), beat: ls('hp-flip-beat') }));
 }
 function readSets() {
   return fetch('/api/sets', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : []));
@@ -70,6 +87,7 @@ function createGlue(deps) {
         const s = loaded.find((x) => pc.toName(x.name) === n);
         return { name: n, version: s ? s.version : null, on: !!s };
       }),
+      flip: flipSummary(d && d.flip, d && d.beat),
       booster: {
         mode: state.panelCfg.booster.mode,
         setId: state.panelCfg.booster.setId || null,

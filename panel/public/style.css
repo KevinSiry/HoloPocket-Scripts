@@ -67,3 +67,5 @@ summary { cursor: pointer; min-height: 44px; display: flex; align-items: center;
 .small { min-height: 36px; padding: .3rem .7rem; font-size: .85rem; }
 .switch { min-height: 36px; }
 @media (max-width: 480px) { .bar-item { width: 100%; } .stat .v { font-size: .9rem; } }
+.flog { list-style: none; margin: .3rem 0 0; padding: 0; font: .78rem/1.35 ui-monospace, monospace; }
+.flog li { display: flex; gap: .5rem; padding: .15rem 0; border-bottom: 1px solid var(--line); }

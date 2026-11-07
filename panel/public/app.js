@@ -118,6 +118,19 @@ function scriptsBlock(bot, card) {
 }
 
 const acc = (bot) => `/api/accounts/${encodeURIComponent(bot.name)}`;
+const hhmm = (iso) => (iso ? new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '');
+function flipBlock(f) {
+  const box = el('div', 'block');
+  box.append(el('h3', null, 'Achat-revente'));
+  box.append(el('p', 'muted line', `Dernier passage : ${ago(f.lastPassAt)}${f.error ? ` · erreur : ${f.error}` : ''}`));
+  box.append(el('p', 'muted line', `Enchères suivies ${f.bids} · à revendre ${f.toResell}${f.waiting ? ` (${f.waiting} en attente d'une place)` : ''} · achats ${f.bought} · ventes ${f.sold} · bénéfice ${f.profit >= 0 ? '+' : ''}${num(f.profit)}`));
+  const ol = el('ol', 'flog');
+  for (const l of f.log.slice().reverse()) { const li = el('li'); li.append(el('time', 'muted', hhmm(l.at)), el('span', null, l.text)); ol.append(li); }
+  if (!f.log.length) ol.append(el('li', 'muted', 'Aucune enchère pour le moment.'));
+  box.append(ol);
+  return box;
+}
+
 function manageBlock(bot, card) {
   const row = el('div', 'actions');
   const btn = (label, fn, cls = 'ghost') => { const b = el('button', cls, label); b.addEventListener('click', fn); row.append(b); };
@@ -180,6 +193,7 @@ async function accountCard(bot, globalChoice) {
     const r = el('button', 'ghost small', 'Redémarrer');
     r.addEventListener('click', () => { if (confirm(`Redémarrer le bot ${bot.name} ?`)) act(card, () => api('POST', `/api/bots/${encodeURIComponent(bot.name)}/restart`).then(() => toast('Redémarrage demandé'))); });
     const parts = [boosterBlock(bot, card, globalChoice), scriptsBlock(bot, card)];
+    if (s.flip && s.scripts.some((x) => x.name === 'achat-revente' && x.on)) parts.push(flipBlock(s.flip));
     if (manage) parts.push(manageBlock(bot, card));
     parts.push(r);
     card.append(fold(bot.name, 'Réglages', ...parts));

@@ -45,7 +45,7 @@ function toast(text, bad) {
 }
 
 function setOptions(sel, sets) {
-  for (const x of sets.filter((x) => !x.promo)) { const o = el('option', null, x.name + (x.favorite ? ' ★' : '')); o.value = x.id; sel.append(o); }
+  for (const x of sets.filter((x) => !x.promo)) { const o = el('option', null, x.name + (x.favorite ? ' ★' : '')); o.value = `set:${x.id}`; sel.append(o); }
 }
 const describe = (c, sets) => (c.mode === 'fixed' ? (sets.find((x) => x.id === c.setId) || { name: c.setId }).name : 'Auto (meilleur favori)');
 // valeur du <select> <-> choix

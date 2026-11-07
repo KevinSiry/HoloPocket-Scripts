@@ -117,6 +117,35 @@ test('vue d’ensemble et journal', async () => {
   assert.strictEqual(l.lines[0].bot, 'c1');
   s.close();
 });
+test('booster global : enregistré, appliqué aux comptes qui le suivent, entrée refusée si invalide', async () => {
+  const pushed = [];
+  const st = { name: 'c1', online: true, lastSeen: Date.now(), status: { booster: { mode: 'auto', setId: null }, bot: { sessionOk: true }, account: { quarantined: false, energy: { fullSince: null } }, trades: { fullSince: null }, scripts: [] }, logs: [] };
+  const s = await boot({ fns: { get: () => st, refreshAll: async () => [st], config: async (n, p) => { pushed.push([n, p]); st.status.booster = { mode: p.booster.mode, setId: p.booster.setId || null }; return { ok: true }; } } });
+  const cookie = await s.session();
+  const h = { 'X-Panel': '1' };
+  const bad = await s.req('PUT', '/api/booster/global', { body: { mode: 'fixed' }, headers: h, cookie });
+  assert.strictEqual(bad.status, 400);
+  assert.strictEqual((await s.req('PUT', '/api/booster/global', { body: { mode: 'global' }, headers: h, cookie })).status, 400, '« global » n’a pas de sens pour le global');
+  const ok = await s.req('PUT', '/api/booster/global', { body: { mode: 'fixed', setId: 'me05' }, headers: h, cookie });
+  assert.deepStrictEqual(await ok.json(), { ok: true, failed: [] });
+  assert.deepStrictEqual(pushed, [['c1', { booster: { mode: 'fixed', setId: 'me05' } }]]);
+  const o = await (await s.req('GET', '/api/overview', { cookie })).json();
+  assert.deepStrictEqual(o.booster.global, { mode: 'fixed', setId: 'me05' });
+  assert.deepStrictEqual(o.bots[0].booster.choice, { mode: 'global' });
+  // le compte prend son propre choix
+  await s.req('PUT', '/api/bots/c1/booster', { body: { mode: 'auto' }, headers: h, cookie });
+  assert.deepStrictEqual(pushed.at(-1), ['c1', { booster: { mode: 'auto' } }]);
+  assert.strictEqual((await s.req('PUT', '/api/bots/zzz/booster', { body: { mode: 'auto' }, headers: h, cookie })).status, 404);
+  // la route générale ne règle plus le booster
+  assert.strictEqual((await s.req('PUT', '/api/bots/c1/config', { body: { booster: { mode: 'auto' } }, headers: h, cookie })).status, 400);
+  s.close();
+});
+test('booster : exige l’en-tête X-Panel et une session', async () => {
+  const s = await boot();
+  assert.strictEqual((await s.req('PUT', '/api/booster/global', { body: { mode: 'auto' }, cookie: await s.session() })).status, 403);
+  assert.strictEqual((await s.req('PUT', '/api/booster/global', { body: { mode: 'auto' }, headers: { 'X-Panel': '1' } })).status, 401);
+  s.close();
+});
 test('déconnexion : cookie effacé ; en-têtes de sécurité présents', async () => {
   const s = await boot();
   const r = await s.req('POST', '/api/logout', { headers: { 'X-Panel': '1' } });

@@ -5,6 +5,7 @@ const path = require('path');
 const auth = require('./lib/auth');
 const { parseBots, createBots } = require('./lib/bots');
 const { computeAlerts } = require('./lib/alerts');
+const { createStore, createReconciler } = require('./lib/booster');
 
 const SESSION_MS = 12 * 3600000;
 const PUBLIC = path.join(__dirname, 'public');
@@ -17,6 +18,8 @@ const HEADERS = {
 
 function createApp(opts) {
   const { passwordHash, secret, bots, trustProxy = false, secureCookie = true, now = Date.now } = opts;
+  const store = opts.store || createStore(null);
+  const rec = opts.reconciler || createReconciler({ store, push: (n, p) => bots.config(n, p) });
   const throttle = opts.throttle || auth.createThrottle({ now });
   const send = (res, status, body, type = 'application/json; charset=utf-8', extra = {}) => {
     const data = typeof body === 'string' ? body : JSON.stringify(body);
@@ -71,9 +74,12 @@ function createApp(opts) {
 
       if (req.method === 'GET' && p === '/api/overview') {
         const list = await bots.refreshAll();
+        await rec.run(list);
+        const errs = rec.errors();
         return send(res, 200, {
           at: new Date(now()).toISOString(),
-          bots: list.map((b) => ({ name: b.name, online: b.online, lastSeen: b.lastSeen ? new Date(b.lastSeen).toISOString() : null, status: b.status })),
+          booster: { global: store.global() },
+          bots: list.map((b) => ({ name: b.name, online: b.online, lastSeen: b.lastSeen ? new Date(b.lastSeen).toISOString() : null, status: b.status, booster: { choice: store.choice(b.name), error: errs[b.name] || null } })),
           alerts: computeAlerts(list, now()),
         });
       }
@@ -84,6 +90,21 @@ function createApp(opts) {
         const level = url.searchParams.get('level');
         return send(res, 200, { lines: all.filter((l) => !level || l.level === level).slice(-300) });
       }
+      // Booster : réglage global et choix par compte (c'est le panel qui l'envoie aux bots)
+      const okChoice = (v, allowGlobal) => v && typeof v === 'object' && (v.mode === 'auto' || (allowGlobal && v.mode === 'global') || (v.mode === 'fixed' && typeof v.setId === 'string' && v.setId.trim()));
+      if (req.method === 'PUT' && (p === '/api/booster/global' || /^\/api\/bots\/[^/]+\/booster$/.test(p))) {
+        let v; try { v = JSON.parse(await readBody(req)); } catch (e) { if (e.status) throw e; return send(res, 400, { error: 'JSON invalide' }); }
+        const isGlobal = p === '/api/booster/global';
+        const name = isGlobal ? null : decodeURIComponent(p.split('/')[3]);
+        if (!isGlobal && !bots.has(name)) return send(res, 404, { error: 'compte inconnu' });
+        if (!okChoice(v, !isGlobal)) return send(res, 400, { error: 'réglage de booster invalide' });
+        if (isGlobal) store.setGlobal(v); else store.setChoice(name, v);
+        rec.forget();
+        await rec.run(await bots.refreshAll());
+        const errs = rec.errors();
+        const failed = isGlobal ? Object.keys(errs) : (errs[name] ? [name] : []);
+        return send(res, 200, { ok: true, failed: failed.map((n) => ({ name: n, error: errs[n] })) });
+      }
       const m = /^\/api\/bots\/([^/]+)\/(sets|config|restart)$/.exec(p);
       if (m) {
         const name = decodeURIComponent(m[1]);
@@ -92,6 +113,7 @@ function createApp(opts) {
           if (req.method === 'GET' && m[2] === 'sets') return send(res, 200, await bots.sets(name));
           if (req.method === 'PUT' && m[2] === 'config') {
             let patch; try { patch = JSON.parse(await readBody(req)); } catch (e) { if (e.status) throw e; return send(res, 400, { error: 'JSON invalide' }); }
+            if (patch && patch.booster) return send(res, 400, { error: 'le booster se règle via le réglage global ou le choix du compte' });
             return send(res, 200, await bots.config(name, patch));
           }
           if (req.method === 'POST' && m[2] === 'restart') return send(res, 200, await bots.restart(name));
@@ -116,12 +138,14 @@ function main() {
   const list = parseBots(env.PANEL_BOTS);
   if (!list.length) { console.error('PANEL_BOTS invalide : attendu compte1=http://compte1:3100,compte2=http://compte2:3100'); process.exit(2); }
   const bots = createBots({ bots: list, token: env.PANEL_TOKEN });
-  const app = createApp({
+  const store = createStore(path.join(env.PANEL_DATA_DIR || '/data', 'panel-state.json'));
+  const reconciler = createReconciler({ store, push: (n, p) => bots.config(n, p) });
+  const app = createApp({ store, reconciler,
     passwordHash: env.PANEL_PASSWORD_HASH, secret: env.PANEL_SECRET, bots,
     trustProxy: env.PANEL_TRUST_PROXY === '1', secureCookie: env.PANEL_INSECURE_COOKIE !== '1',
   });
   // Les journaux et alertes se construisent même quand personne ne regarde le panel
-  setInterval(() => bots.refreshAll().catch(() => {}), 10000);
+  setInterval(() => bots.refreshAll().then((l) => reconciler.run(l)).catch(() => {}), 10000);
   const port = +(env.PANEL_PORT || 8080);
   app.listen(port, '0.0.0.0', () => console.log(`Panel à l’écoute sur le port ${port} · ${list.length} compte(s)`));
 }

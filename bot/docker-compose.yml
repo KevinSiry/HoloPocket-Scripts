@@ -44,6 +44,8 @@ services:
     environment:
       PANEL_TRUST_PROXY: "1"      # derrière Traefik : l'adresse du visiteur vient de X-Forwarded-For
     depends_on: [compte1, compte2, compte3]
+    volumes:
+      - panel-data:/data         # réglage global du booster
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
@@ -72,6 +74,9 @@ services:
       - "traefik.http.middlewares.hp-panel-ratelimit.ratelimit.average=20"
       - "traefik.http.middlewares.hp-panel-ratelimit.ratelimit.period=1s"
       - "traefik.http.middlewares.hp-panel-ratelimit.ratelimit.burst=60"
+
+volumes:
+  panel-data:
 
 networks:
   internal:

@@ -44,3 +44,5 @@ body.login { display: grid; place-items: center; min-height: 100vh; }
 .err { color: var(--bad); margin: 0; }
 [hidden] { display: none !important; }
 @media (max-width: 480px) { #accounts { grid-template-columns: 1fr; } }
+.card.global { grid-column: 1 / -1; border-color: var(--acc); }
+.card.global select { width: 100%; max-width: 420px; }

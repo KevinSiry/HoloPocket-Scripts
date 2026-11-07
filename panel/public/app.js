@@ -44,23 +44,52 @@ function toast(text, bad) {
   setTimeout(() => t.remove(), 4000);
 }
 
-async function boosterBlock(bot, card) {
+function setOptions(sel, sets) {
+  for (const x of sets.filter((x) => !x.promo)) { const o = el('option', null, x.name + (x.favorite ? ' ★' : '')); o.value = x.id; sel.append(o); }
+}
+const describe = (c, sets) => (c.mode === 'fixed' ? (sets.find((x) => x.id === c.setId) || { name: c.setId }).name : 'Auto (meilleur favori)');
+// valeur du <select> <-> choix
+const toValue = (c) => (c.mode === 'global' ? 'global' : c.mode === 'auto' ? 'auto' : `set:${c.setId}`);
+const fromValue = (v) => (v === 'global' ? { mode: 'global' } : v === 'auto' ? { mode: 'auto' } : { mode: 'fixed', setId: v.slice(4) });
+const sendBooster = (url, v) => api('PUT', url, fromValue(v)).then((r) => {
+  if (r.failed && r.failed.length) toast(`Refusé par : ${r.failed.map((f) => `${f.name} (${f.error})`).join(', ')}`, true);
+  else toast('Booster enregistré');
+});
+
+function boosterBlock(bot, card, globalChoice) {
   const s = bot.status;
+  const sets = openSets._any || [];
   const box = el('div', 'block');
   box.append(el('h3', null, 'Booster à ouvrir'));
-  const row = el('div', 'row');
   const sel = el('select');
   sel.setAttribute('aria-label', `Booster du compte ${bot.name}`);
-  const auto = el('option', null, 'Auto (meilleur favori)'); auto.value = '';
-  sel.append(auto);
-  const sets = openSets[bot.name] || [];
-  for (const x of sets.filter((x) => !x.promo)) { const o = el('option', null, x.name + (x.favorite ? ' ★' : '')); o.value = x.id; sel.append(o); }
-  sel.value = s.booster.mode === 'fixed' ? s.booster.setId : '';
-  sel.addEventListener('change', () => act(card, () => api('PUT', `/api/bots/${encodeURIComponent(bot.name)}/config`, { booster: sel.value ? { mode: 'fixed', setId: sel.value } : { mode: 'auto' } }).then(() => toast('Booster enregistré'))));
-  row.append(sel);
-  box.append(row);
-  if (s.booster.mode === 'auto') box.append(el('p', 'muted', s.booster.favorites.length ? `Favoris : ${s.booster.favorites.map((f) => f.name).join(', ')}` : 'Aucun favori sur le compte.'));
+  const g = el('option', null, `Global : ${describe(globalChoice, sets)}`); g.value = 'global';
+  const a = el('option', null, 'Auto (meilleur favori)'); a.value = 'auto';
+  sel.append(g, a);
+  setOptions(sel, sets);
+  sel.value = toValue(bot.booster.choice);
+  sel.addEventListener('change', () => act(card, () => sendBooster(`/api/bots/${encodeURIComponent(bot.name)}/booster`, sel.value)));
+  box.append(el('div', 'row', null));
+  box.lastChild.append(sel);
+  if (bot.booster.error) box.append(el('p', 'err', `Non appliqué : ${bot.booster.error}`));
+  else if (s.booster.mode === 'auto' && s.booster.favorites.length) box.append(el('p', 'muted', `Favoris : ${s.booster.favorites.map((f) => f.name).join(', ')}`));
   return box;
+}
+
+function globalCard(globalChoice, bots) {
+  const card = el('article', 'card global');
+  const sets = openSets._any || [];
+  card.append(el('h2', null, 'Booster à ouvrir · tous les comptes'));
+  const sel = el('select');
+  sel.setAttribute('aria-label', 'Booster global');
+  const a = el('option', null, 'Auto (meilleur favori)'); a.value = 'auto';
+  sel.append(a);
+  setOptions(sel, sets);
+  sel.value = toValue(globalChoice);
+  const follow = bots.filter((b) => b.booster.choice.mode === 'global').map((b) => b.name);
+  sel.addEventListener('change', () => act(card, () => sendBooster('/api/booster/global', sel.value)));
+  card.append(sel, el('p', 'muted', follow.length ? `Suivent ce réglage : ${follow.join(', ')}` : 'Aucun compte ne suit ce réglage.'));
+  return card;
 }
 
 function scriptsBlock(bot, card) {
@@ -76,7 +105,7 @@ function scriptsBlock(bot, card) {
   return box;
 }
 
-async function accountCard(bot) {
+async function accountCard(bot, globalChoice) {
   const card = el('article', 'card');
   const head = el('div', 'head');
   const s = bot.status;
@@ -95,8 +124,7 @@ async function accountCard(bot) {
   grid.append(stat('En vente', `${num(s.sales.selling)} / ${num(s.sales.max)}`, s.sales.selling, s.sales.max));
   card.append(grid);
   if (bot.online) {
-    if (!openSets[bot.name]) { try { openSets[bot.name] = await api('GET', `/api/bots/${encodeURIComponent(bot.name)}/sets`); } catch { openSets[bot.name] = []; } }
-    card.append(await boosterBlock(bot, card), scriptsBlock(bot, card));
+    card.append(boosterBlock(bot, card, globalChoice), scriptsBlock(bot, card));
     const r = el('button', 'ghost', 'Redémarrer le bot');
     r.addEventListener('click', () => { if (confirm(`Redémarrer le bot ${bot.name} ?`)) act(card, () => api('POST', `/api/bots/${encodeURIComponent(bot.name)}/restart`).then(() => toast('Redémarrage demandé'))); });
     card.append(r);
@@ -126,8 +154,11 @@ async function refresh(force) {
   try {
     const d = await api('GET', '/api/overview');
     renderAlerts(d.alerts);
-    const cards = await Promise.all(d.bots.map(accountCard));
-    if (!busy) $('accounts').replaceChildren(...cards);
+    // Liste des séries (la même pour tous les comptes) : lue une fois sur le premier bot en ligne
+    if (!openSets._any || !openSets._any.length) { const on = d.bots.find((b) => b.online); if (on) { try { openSets._any = await api('GET', `/api/bots/${encodeURIComponent(on.name)}/sets`); } catch {} } }
+    const cards = d.bots.map((b) => accountCard(b, d.booster.global));
+    const resolved = await Promise.all(cards);
+    if (!busy) $('accounts').replaceChildren(globalCard(d.booster.global, d.bots), ...resolved);
     const sel = $('logBot');
     if (sel.options.length === 1) for (const b of d.bots) { const o = el('option', null, b.name); o.value = b.name; sel.append(o); }
     $('stamp').textContent = `Mis à jour ${new Date(d.at).toLocaleTimeString('fr-FR')}`;

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Vendre mes doublons
 // @namespace    kevin.holopocket
-// @version      4.6
+// @version      4.7
 // @description  Marché : met en vente les doublons (prix conseillé, les plus chers d'abord), à la demande ou en mode auto qui remplit les slots dès qu'une place se libère.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -189,7 +189,7 @@
 
   // ───────── Mode auto : remplit les slots dès qu'une place se libère ─────────
   const AUTO_KEY = 'hp-sell-auto-on';
-  const AUTO_POLL_MS = 30000;
+  const AUTO_POLL_MS = 90000;
   let autoOn = false;
   try { autoOn = localStorage.getItem(AUTO_KEY) === '1'; } catch {}
 

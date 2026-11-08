@@ -10,7 +10,7 @@ Chaque script contient `@updateURL` : Tampermonkey récupère tout seul les nouv
 
 | Script | Version | Lien |
 |---|---|---|
-| Achat-revente intelligent | 1.10 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-revente.user.js) |
+| Achat-revente intelligent | 1.11 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-revente.user.js) |
 | Achat des cartes manquantes bradées (auto, 70 % du prix moyen) | 1.5 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-manquantes.user.js) |
 | Enchérir sur mes cartes manquantes | 2.1 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-acheter-manquantes.user.js) |
 | Ouverture auto dès que l’énergie suffit | 2.3 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-auto-booster.user.js) |
@@ -18,7 +18,7 @@ Chaque script contient `@updateURL` : Tampermonkey récupère tout seul les nouv
 | Chances de nouvelles cartes par booster | 2.0 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-chances-boosters.user.js) |
 | Assistant Coffre | 2.0 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-coffre.user.js) |
 | Assistant Connexions | 2.0 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-connexions.user.js) |
-| Échanges équitables | 3.16 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js) |
+| Échanges équitables | 3.17 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js) |
 | Recyclage intelligent des doublons | 1.1 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-recyclage.user.js) |
 | Vendre mes doublons | 4.2 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-vendre-doublons.user.js) |
 | Assistant Les Voisins | 2.0 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-voisins.user.js) |

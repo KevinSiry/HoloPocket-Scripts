@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.16
+// @version      3.17
 // @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord, avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, et des pièces du compte une fois par heure, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -875,9 +875,9 @@
     const last = readAutoLast();
     if (autoOn && !busy && openTrades < CONFIG.MAX_OPEN_TRADES && last && last.full) autoCycle(true);
   }
-  setInterval(() => { if (location.pathname.startsWith('/echanges') || autoOn) countOpen(); }, 30000);
+  setInterval(() => { if (location.pathname.startsWith('/echanges') || autoOn) countOpen(); }, 120000);
   if (autoOn) setTimeout(() => autoCycle(), 5000);
-  setInterval(() => autoCycle(), 60000);
+  setInterval(() => autoCycle(), 120000);
   setTimeout(() => cancelStale(), 8000);
   setInterval(() => { if (!busy) cancelStale(); }, 5 * 60000);
   addEventListener('beforeunload', () => { if (busy && autoOn) releaseLock(); });

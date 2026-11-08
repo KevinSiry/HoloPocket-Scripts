@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Ouverture auto dès que l'énergie suffit
 // @namespace    kevin.holopocket
-// @version      2.3
+// @version      2.4
 // @description  Surveille l'énergie en arrière-plan. Dès qu'elle suffit (énergie bonus comprise), ouvre 1 booster de la série favorite qui a le plus de chance de donner une nouvelle carte (ou d'une série fixe choisie dans le panel).
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -15,7 +15,7 @@
   const CONFIG = {
     COUNT_REVERSE: true,     // une reverse manquante compte comme une nouvelle carte
     KEEP_BONUS: false,       // false = l'énergie bonus sert aussi (true = seulement le stock qui se régénère)
-    POLL_MS: 30000,          // fréquence de vérification de l'énergie (ms)
+    POLL_MS: 60000,          // fréquence de vérification de l'énergie (ms)
     MAX_OPENS: Infinity,     // plafond d'ouvertures auto par session (Infinity = sans limite)
     AUTO_START: false,       // démarrer la surveillance dès le chargement de la page
   };
@@ -210,7 +210,7 @@
   render(null);
   refreshEnergy();
   setInterval(() => render(null), 1000);              // compte à rebours + navigation interne
-  setInterval(() => { if (!state.on) refreshEnergy(); }, 60000);
+  setInterval(() => { if (!state.on) refreshEnergy(); }, 180000);
   // Reprise de l'état entre les pages
   let saved = '0'; try { saved = localStorage.getItem(LS_KEY) || '0'; } catch {}
   if (saved === '1' || CONFIG.AUTO_START) start();

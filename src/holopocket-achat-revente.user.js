@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Achat-revente intelligent
 // @namespace    kevin.holopocket
-// @version      1.10
+// @version      1.11
 // @description  Mode auto : enchérit sur les ventes qui se terminent dans moins de 5 min quand la carte part bien en dessous de sa valeur réelle, garde les cartes qui manquaient à ta collection et remet les autres en vente avec une marge.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -27,7 +27,7 @@
     MAX_TRIES: 3,            // après 3 ventes sans acheteur, départ au prix de revient
     TAX: 0.05,               // taxe du site sur le prix final
     // Divers
-    POLL_S: 15,              // un passage toutes les 15 s quand le mode auto est actif
+    POLL_S: 30,              // un passage toutes les 30 s quand le mode auto est actif
     PRICE_CACHE_MIN: 10,     // les prix d'une carte sont relus au plus toutes les 10 min
     MAX_PAGES: 15,
     DELAY: 250,

@@ -146,7 +146,8 @@ function searchSelect({ label, value, pinned = [], choices, onChange }) {
   };
   // Position fixe sous le bouton (les cartes coupent ce qui dépasse), au-dessus s'il manque de place
   const place = () => {
-    const r = btn.getBoundingClientRect(), vw = document.documentElement.clientWidth, vh = window.innerHeight;
+    const vv = window.visualViewport;
+    const r = btn.getBoundingClientRect(), vw = document.documentElement.clientWidth, vh = vv ? vv.height + vv.offsetTop : window.innerHeight;
     const w = Math.min(Math.max(r.width, 288), vw - 16);
     pop.style.width = `${w}px`;
     pop.style.left = `${Math.max(8, Math.min(r.left, vw - w - 8))}px`;
@@ -155,7 +156,8 @@ function searchSelect({ label, value, pinned = [], choices, onChange }) {
     else { pop.style.bottom = ''; pop.style.top = `${r.bottom + 6}px`; }
   };
   const onOutside = (e) => { if (!root.contains(e.target)) close(false); };
-  const onScroll = (e) => { if (!pop.contains(e.target)) close(false); };
+  // Défilement de la page (ex. clavier mobile qui s'ouvre et fait remonter le champ) : la liste suit le bouton au lieu de se fermer
+  const onScroll = (e) => { if (!pop.contains(e.target)) place(); };
   const open = () => {
     if (!pop.hidden) return;
     pop.hidden = false; root.classList.add('open'); btn.setAttribute('aria-expanded', 'true');
@@ -163,6 +165,7 @@ function searchSelect({ label, value, pinned = [], choices, onChange }) {
     document.addEventListener('pointerdown', onOutside, true);
     window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', place);
+    if (window.visualViewport) { visualViewport.addEventListener('resize', place); visualViewport.addEventListener('scroll', place); }
   };
   const close = (refocus) => {
     if (pop.hidden) return;
@@ -170,6 +173,7 @@ function searchSelect({ label, value, pinned = [], choices, onChange }) {
     document.removeEventListener('pointerdown', onOutside, true);
     window.removeEventListener('scroll', onScroll, true);
     window.removeEventListener('resize', place);
+    if (window.visualViewport) { visualViewport.removeEventListener('resize', place); visualViewport.removeEventListener('scroll', place); }
     if (refocus) btn.focus();
   };
   const pick = (c) => { close(true); if (c.value !== value) { value = c.value; showCur(); onChange(c.value); } };

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.13
+// @version      3.14
 // @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord, avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, et des pièces du compte une fois par heure, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -38,7 +38,7 @@
     FAVORITES_ONLY: false,   // false : toutes les séries (les favoris restent prioritaires) · true : séries en favori uniquement
     PRIORITY_MAX_CARDS: 10, // échange prioritaire : cartes données par envoi (10 = limite du site)
     PRIORITY_MAX_CHECK: 40, // …et fiches de cartes vérifiées au plus par passage
-    PRIORITY_COINS: true,   // …joint aussi les pièces du compte à l'échange (pour les ramener sur le compte principal)
+    PRIORITY_COINS: false,  // …joint aussi les pièces du compte à l'échange : coupé, un transfert à sens unique de pièces est un signal fort pour le site
     PRIORITY_COINS_EVERY_MIN: 60, // …au plus une fois par heure
     PRIORITY_COINS_KEEP: 0, // …pièces laissées sur ce compte
     PRIORITY_COINS_MIN: 20, // …rien envoyé en dessous de ce solde (inutile de gaspiller un échange)

@@ -20,9 +20,9 @@ main, #alerts, #stamp { max-width: 1100px; margin: 0 auto; padding: 0 1rem; }
 .pill.ok { color: var(--ok); } .pill.bad { color: var(--bad); }
 .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: .4rem; }
 .stat { display: flex; flex-direction: column; gap: .15rem; }
-.stat .k { color: var(--mut); font-size: .7rem; }
+.stat .k { color: var(--mut); font-size: .75rem; }
 .stat .v { font-size: .95rem; font-weight: 600; white-space: nowrap; }
-progress { width: 100%; height: 4px; accent-color: var(--acc); }
+progress { width: 100%; height: 6px; accent-color: var(--acc); }
 .block { border-top: 1px solid var(--line); padding-top: .6rem; }
 .row select { width: 100%; }
 .switch { display: flex; align-items: center; gap: .6rem; min-height: 44px; }
@@ -71,3 +71,35 @@ summary { cursor: pointer; min-height: 44px; display: flex; align-items: center;
 .flog li { display: flex; gap: .5rem; padding: .15rem 0; border-bottom: 1px solid var(--line); }
 .alert { display: flex; justify-content: space-between; align-items: flex-start; gap: .6rem; }
 .alert-x { background: none; border: 0; color: inherit; font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 0 .2rem; }
+
+/* Audit UX : focus visible, cibles tactiles, lien profil, dialogue, résumé */
+:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+header { position: sticky; top: 0; z-index: 5; background: var(--bg); }
+#stamp { margin: 0; padding: 0; max-width: none; font-size: .8rem; }
+.title { display: flex; align-items: baseline; gap: .5rem; min-width: 0; }
+.profile { color: var(--acc); font-size: .8rem; text-decoration: none; white-space: nowrap; border-radius: 4px; }
+.profile:hover { text-decoration: underline; }
+.inline-link { margin-left: .25rem; }
+.alert-x { min-width: 44px; min-height: 44px; margin: -.6rem -.8rem -.6rem 0; font-size: 1.3rem; }
+.alert > span { align-self: center; }
+#alerts .small { justify-self: start; }
+.summary { display: flex; flex-wrap: wrap; gap: .6rem; padding-top: .75rem; }
+.chip { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: .4rem .8rem; min-width: 7.5rem; }
+.chip .k { color: var(--mut); font-size: .75rem; }
+.chip b { font-size: 1.05rem; }
+.chip.warnc b { color: var(--warn); }
+.empty { color: var(--mut); grid-column: 1 / -1; padding: 1.5rem 0; text-align: center; }
+.lvl { font-size: .72rem; border: 1px solid currentColor; border-radius: 999px; padding: 0 .4rem; align-self: center; }
+#logList li.warn .lvl { color: var(--warn); } #logList li.error .lvl { color: var(--bad); }
+.danger { background: var(--bad); color: #111; border-color: var(--bad); font-weight: 600; }
+.danger-text { color: var(--bad); }
+.primary { background: var(--acc); color: #111; border-color: var(--acc); font-weight: 600; }
+dialog { color: var(--txt); background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 1.1rem; width: min(420px, 92vw); }
+dialog::backdrop { background: rgba(0, 0, 0, .6); }
+dialog h2 { font-size: 1.05rem; margin-bottom: .4rem; }
+dialog p { margin: 0 0 .8rem; color: var(--mut); }
+dialog output { display: block; font: 1rem ui-monospace, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: .6rem; margin-bottom: .8rem; word-break: break-all; user-select: all; }
+dialog .actions { border-top: 0; padding-top: 0; justify-content: flex-end; }
+#toasts { position: fixed; left: 50%; bottom: 1rem; transform: translateX(-50%); display: grid; gap: .5rem; z-index: 20; max-width: 92vw; }
+.toast { position: static; transform: none; }
+@media (max-width: 480px) { .chip { flex: 1 1 40%; } #stamp { order: 5; width: 100%; } }

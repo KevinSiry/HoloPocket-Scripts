@@ -10,17 +10,19 @@
 <body>
 <header>
   <h1>HoloPocket</h1>
-  <nav>
-    <button data-tab="accounts" class="tab on">Comptes</button>
-    <button data-tab="logs" class="tab">Journal</button>
+  <nav role="tablist" aria-label="Sections">
+    <button data-tab="accounts" class="tab on" role="tab" aria-selected="true" id="tab-accounts" aria-controls="accounts">Comptes</button>
+    <button data-tab="logs" class="tab" role="tab" aria-selected="false" id="tab-logs" aria-controls="logs">Journal</button>
   </nav>
+  <span id="stamp" class="muted" role="status"></span>
   <button id="logout" class="ghost">Déconnexion</button>
 </header>
 <section id="alerts" aria-live="polite"></section>
 <main>
+  <section id="summary" class="summary" aria-label="Résumé"></section>
   <section id="toolbar"></section>
-  <section id="accounts"></section>
-  <section id="logs" hidden>
+  <section id="accounts" role="tabpanel" aria-labelledby="tab-accounts"></section>
+  <section id="logs" role="tabpanel" aria-labelledby="tab-logs" hidden>
     <div class="bar">
       <select id="logBot" aria-label="Compte"><option value="">Tous les comptes</option></select>
       <label><input type="checkbox" id="logWarn"> Alertes seulement</label>
@@ -28,7 +30,8 @@
     <ol id="logList"></ol>
   </section>
 </main>
-<p id="stamp" class="muted"></p>
+<dialog id="dlg"><form method="dialog" id="dlgForm"><h2 id="dlgTitle"></h2><p id="dlgText"></p><output id="dlgSecret" hidden></output><div class="actions" id="dlgActions"></div></form></dialog>
+<div id="toasts" role="status" aria-live="polite"></div>
 <script src="/app.js"></script>
 </body>
 </html>

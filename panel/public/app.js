@@ -25,6 +25,39 @@ const ago = (iso) => {
 };
 const num = (n) => (n == null ? '–' : Number(n).toLocaleString('fr-FR'));
 
+const PROFILE = (name) => `https://holopocket.fr/joueur/${encodeURIComponent(name)}`;
+function profileLink(name, cls = 'profile') {
+  const a = el('a', cls, 'Profil ↗');
+  a.href = PROFILE(name); a.target = '_blank'; a.rel = 'noopener noreferrer';
+  a.title = `Ouvrir le profil de ${name} sur HoloPocket`;
+  a.setAttribute('aria-label', `Profil HoloPocket de ${name} (nouvel onglet)`);
+  return a;
+}
+
+// Boîte de dialogue maison (à la place de confirm/prompt du navigateur)
+function dialog({ title, text, secret, confirm: yes, danger }) {
+  return new Promise((resolve) => {
+    const d = $('dlg'), acts = $('dlgActions'), sec = $('dlgSecret');
+    $('dlgTitle').textContent = title; $('dlgText').textContent = text || '';
+    sec.hidden = !secret; sec.textContent = secret || '';
+    acts.replaceChildren();
+    const mk = (label, cls, val) => { const b = el('button', cls, label); b.type = 'button'; b.addEventListener('click', () => { d.close(); resolve(val); }); acts.append(b); return b; };
+    if (secret) {
+      const c = el('button', 'primary', 'Copier'); c.type = 'button';
+      c.addEventListener('click', async () => { try { await navigator.clipboard.writeText(secret); c.textContent = 'Copié'; } catch { c.textContent = 'Copie impossible'; } });
+      acts.append(c);
+      mk('Fermer', 'ghost', true);
+    } else {
+      mk('Annuler', 'ghost', false);
+      mk(yes || 'Confirmer', danger ? 'danger' : 'primary', true);
+    }
+    d.addEventListener('close', () => { sec.textContent = ''; resolve(false); }, { once: true });
+    d.showModal();
+    acts.querySelector('button').focus();
+  });
+}
+const confirmBox = (title, text, yes, danger) => dialog({ title, text, confirm: yes, danger });
+
 let manage = false; // le panel gère les comptes (mode flotte)
 let busy = 0; // pause du rafraîchissement pendant une action
 let openSets = {};
@@ -51,8 +84,8 @@ async function act(card, fn) {
 }
 function toast(text, bad) {
   const t = el('div', bad ? 'toast bad' : 'toast', text);
-  document.body.append(t);
-  setTimeout(() => t.remove(), 4000);
+  $('toasts').append(t);
+  setTimeout(() => t.remove(), bad ? 8000 : 4000);
 }
 
 function setOptions(sel, sets) {
@@ -79,7 +112,7 @@ function boosterBlock(bot, card, globalChoice) {
   sel.append(g, a);
   setOptions(sel, sets);
   sel.value = toValue(bot.booster.choice);
-  sel.addEventListener('change', () => act(card, () => sendBooster(`/api/bots/${encodeURIComponent(bot.name)}/booster`, sel.value)));
+  sel.addEventListener('change', () => { sel.blur(); act(card, () => sendBooster(`/api/bots/${encodeURIComponent(bot.name)}/booster`, sel.value)); });
   box.append(el('div', 'row', null));
   box.lastChild.append(sel);
   if (bot.booster.error) box.append(el('p', 'err', `Non appliqué : ${bot.booster.error}`));
@@ -99,7 +132,7 @@ function globalBar(globalChoice, bots) {
   setOptions(sel, sets);
   sel.value = toValue(globalChoice);
   const follow = bots.filter((b) => b.booster.choice.mode === 'global').length;
-  sel.addEventListener('change', () => act(bar, () => sendBooster('/api/booster/global', sel.value)));
+  sel.addEventListener('change', () => { sel.blur(); act(bar, () => sendBooster('/api/booster/global', sel.value)); });
   lab.append(sel);
   bar.append(lab, el('span', 'muted', `${follow} compte${follow > 1 ? 's' : ''} le suivent`));
   return bar;
@@ -111,7 +144,7 @@ function scriptsBlock(bot, card) {
   for (const sc of bot.status.scripts) {
     const lab = el('label', 'switch');
     const cb = el('input'); cb.type = 'checkbox'; cb.checked = sc.on;
-    cb.addEventListener('change', () => act(card, () => api('PUT', `/api/bots/${encodeURIComponent(bot.name)}/config`, { scripts: { [sc.name]: cb.checked } }).then(() => toast(cb.checked ? 'Script activé' : 'Script coupé'))));
+    cb.addEventListener('change', () => { cb.blur(); act(card, () => api('PUT', `/api/bots/${encodeURIComponent(bot.name)}/config`, { scripts: { [sc.name]: cb.checked } }).then(() => toast(cb.checked ? 'Script activé' : 'Script coupé'))); });
     lab.append(cb, el('span', null, SCRIPT_LABELS[sc.name] || sc.name), el('small', 'muted', sc.version ? `v${sc.version}` : ''));
     box.append(lab);
   }
@@ -135,9 +168,9 @@ function flipBlock(f) {
 function manageBlock(bot, card) {
   const row = el('div', 'actions');
   const btn = (label, fn, cls = 'ghost') => { const b = el('button', cls, label); b.addEventListener('click', fn); row.append(b); };
-  btn('Voir le mot de passe', () => act(card, async () => { const r = await api('POST', `${acc(bot)}/reveal`); prompt(`Mot de passe de ${bot.name} (à copier)`, r.password); }));
+  btn('Voir le mot de passe', () => act(card, async () => { const r = await api('POST', `${acc(bot)}/reveal`); await dialog({ title: `Mot de passe de ${bot.name}`, text: 'À copier maintenant : il disparaît à la fermeture.', secret: r.password }); }));
   btn(bot.disabled ? 'Activer' : 'Désactiver', () => act(card, () => api('PUT', acc(bot), { enabled: !!bot.disabled }).then(() => toast(bot.disabled ? 'Compte activé' : 'Compte désactivé'))));
-  btn('Supprimer', () => { if (confirm(`Supprimer ${bot.name} du panel ?\nSon mot de passe sera perdu (le compte reste sur HoloPocket).`)) act(card, () => api('DELETE', acc(bot)).then(() => toast('Compte supprimé'))); });
+  btn('Supprimer', async () => { if (await confirmBox(`Supprimer ${bot.name} ?`, 'Son mot de passe sera perdu pour le panel. Le compte reste sur HoloPocket.', 'Supprimer', true)) act(card, () => api('DELETE', acc(bot)).then(() => toast('Compte supprimé'))); }, 'ghost danger-text');
   return row;
 }
 
@@ -167,7 +200,10 @@ async function accountCard(bot, globalChoice) {
   const card = el('article', bot.disabled ? 'card off' : 'card');
   const head = el('div', 'head');
   const s = bot.status;
-  head.append(el('h2', null, (s && s.account && s.account.user) || bot.name));
+  const pseudo = (s && s.account && s.account.user) || bot.name;
+  const title = el('div', 'title');
+  title.append(el('h2', null, pseudo), profileLink(pseudo));
+  head.append(title);
   head.append(el('span', bot.disabled ? 'pill off' : bot.online ? 'pill ok' : 'pill bad', bot.disabled ? 'Désactivé' : bot.online ? 'En ligne' : 'Hors ligne'));
   card.append(head);
   if (bot.disabled) { card.append(el('p', 'muted', 'Ce compte ne tourne pas.')); if (manage) card.append(fold(bot.name, 'Gérer', manageBlock(bot, card))); return card; }
@@ -192,7 +228,7 @@ async function accountCard(bot, globalChoice) {
   card.append(el('p', 'muted line', `Booster ${choice} · ${on}/${s.scripts.length} scripts${bot.booster.error ? ' · booster non appliqué' : ''}`));
   if (bot.online) {
     const r = el('button', 'ghost small', 'Redémarrer');
-    r.addEventListener('click', () => { if (confirm(`Redémarrer le bot ${bot.name} ?`)) act(card, () => api('POST', `/api/bots/${encodeURIComponent(bot.name)}/restart`).then(() => toast('Redémarrage demandé'))); });
+    r.addEventListener('click', async () => { if (await confirmBox(`Redémarrer ${bot.name} ?`, 'Le navigateur du compte est relancé et les scripts sont retéléchargés.', 'Redémarrer')) act(card, () => api('POST', `/api/bots/${encodeURIComponent(bot.name)}/restart`).then(() => toast('Redémarrage demandé'))); });
     const parts = [boosterBlock(bot, card, globalChoice), scriptsBlock(bot, card)];
     if (s.flip && s.scripts.some((x) => x.name === 'achat-revente' && x.on)) parts.push(flipBlock(s.flip));
     if (manage) parts.push(manageBlock(bot, card));
@@ -208,17 +244,34 @@ function renderAlerts(alerts) {
   for (const a of alerts) {
     const row = el('div', `alert ${a.level}`);
     const x = el('button', 'alert-x', '×');
-    x.type = 'button'; x.title = 'Fermer'; x.setAttribute('aria-label', 'Fermer cette alerte');
+    x.type = 'button'; x.title = 'Fermer cette alerte'; x.setAttribute('aria-label', 'Fermer cette alerte');
     x.addEventListener('click', () => { row.remove(); api('POST', '/api/alerts/dismiss', { key: a.key }).catch(() => {}); });
-    row.append(el('span', null, `${a.bot} · ${a.text}`), x);
+    const msg = el('span', null);
+    msg.append(el('b', null, a.bot), ` · ${a.text} `, profileLink(a.bot, 'profile inline-link'));
+    row.append(msg, x);
     box.append(row);
   }
   if (alerts.length > 1) {
-    const all = el('button', 'link', 'Tout fermer');
+    const all = el('button', 'ghost small', 'Tout fermer');
     all.type = 'button';
     all.addEventListener('click', () => { box.replaceChildren(); api('POST', '/api/alerts/dismiss', { all: true, keys: alerts.map((a) => a.key) }).catch(() => {}); });
     box.append(all);
   }
+}
+
+function renderSummary(d) {
+  const box = $('summary');
+  const live = d.bots.filter((b) => !b.disabled);
+  const online = live.filter((b) => b.online).length;
+  const coins = d.bots.reduce((t, b) => t + ((b.status && b.status.account && b.status.account.balance) || 0), 0);
+  const trades = d.bots.reduce((t, b) => t + ((b.status && b.status.trades && b.status.trades.open) || 0), 0);
+  box.replaceChildren();
+  const chip = (k, v, cls) => { const c = el('div', `chip ${cls || ''}`); c.append(el('span', 'k', k), el('b', null, v)); box.append(c); };
+  chip('Comptes en ligne', `${online}/${live.length}`, live.length && online < live.length ? 'warnc' : '');
+  chip('Pièces au total', num(coins));
+  chip('Échanges ouverts', num(trades));
+  const n = d.alerts.length;
+  chip('Alertes', String(n), n ? 'warnc' : '');
 }
 
 function renderLogs(lines) {
@@ -226,7 +279,8 @@ function renderLogs(lines) {
   ol.replaceChildren();
   for (const l of lines.slice().reverse()) {
     const li = el('li', l.level);
-    li.append(el('time', 'muted', new Date(l.at).toLocaleTimeString('fr-FR')), el('b', null, l.bot), el('span', null, l.text));
+    const lvl = l.level === 'error' ? 'Erreur' : l.level === 'warn' ? 'Alerte' : '';
+    li.append(el('time', 'muted', new Date(l.at).toLocaleTimeString('fr-FR')), el('b', null, l.bot), ...(lvl ? [el('span', 'lvl', lvl)] : []), el('span', null, l.text));
     ol.append(li);
   }
   if (!lines.length) ol.append(el('li', 'muted', 'Aucune ligne.'));
@@ -238,19 +292,20 @@ async function refresh(force) {
     const d = await api('GET', '/api/overview');
     manage = !!d.manage;
     renderAlerts(d.alerts);
+    renderSummary(d);
     // Liste des séries (la même pour tous les comptes) : lue une fois sur le premier bot en ligne
     if (!openSets._any || !openSets._any.length) { const on = d.bots.find((b) => b.online); if (on) { try { openSets._any = await api('GET', `/api/bots/${encodeURIComponent(on.name)}/sets`); } catch {} } }
     const cards = d.bots.map((b) => accountCard(b, d.booster.global));
     const resolved = await Promise.all(cards);
     // Pas de reconstruction pendant qu'un menu ou un champ est utilisé (sinon la liste se referme)
-    const typing = document.activeElement && ($('accounts').contains(document.activeElement) || $('toolbar').contains(document.activeElement)) && /^(SELECT|INPUT)$/.test(document.activeElement.tagName);
+    const typing = document.activeElement && ($('accounts').contains(document.activeElement) || $('toolbar').contains(document.activeElement)) && (document.activeElement.tagName === 'SELECT' || (document.activeElement.tagName === 'INPUT' && /^(text|password)$/.test(document.activeElement.type)));
     if (!busy && !typing) {
       $('toolbar').replaceChildren(globalBar(d.booster.global, d.bots), ...(manage ? [addBar()] : []));
-      $('accounts').replaceChildren(...resolved);
+      $('accounts').replaceChildren(...(resolved.length ? resolved : [el('p', 'empty', manage ? 'Aucun compte pour le moment. Crée-en un ou ajoute un compte existant avec les boutons ci-dessus.' : 'Aucun bot détecté.')]));
     }
     const sel = $('logBot');
     if (sel.options.length === 1) for (const b of d.bots) { const o = el('option', null, b.name); o.value = b.name; sel.append(o); }
-    $('stamp').textContent = `Mis à jour ${new Date(d.at).toLocaleTimeString('fr-FR')}`;
+    $('stamp').textContent = `Mis à jour à ${new Date(d.at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
     if (!$('logs').hidden) await refreshLogs();
   } catch (e) { $('stamp').textContent = `Erreur : ${e.message}`; }
 }
@@ -262,9 +317,10 @@ async function refreshLogs() {
 }
 
 for (const b of document.querySelectorAll('.tab')) b.addEventListener('click', () => {
-  for (const x of document.querySelectorAll('.tab')) x.classList.toggle('on', x === b);
+  for (const x of document.querySelectorAll('.tab')) { x.classList.toggle('on', x === b); x.setAttribute('aria-selected', String(x === b)); }
   $('accounts').hidden = b.dataset.tab !== 'accounts';
   $('toolbar').hidden = b.dataset.tab !== 'accounts';
+  $('summary').hidden = b.dataset.tab !== 'accounts';
   $('logs').hidden = b.dataset.tab !== 'logs';
   refresh(true);
 });

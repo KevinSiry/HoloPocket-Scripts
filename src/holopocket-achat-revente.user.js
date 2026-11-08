@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Achat-revente intelligent
 // @namespace    kevin.holopocket
-// @version      1.11
+// @version      1.12
 // @description  Mode auto : enchérit sur les ventes qui se terminent dans moins de 5 min quand la carte part bien en dessous de sa valeur réelle, garde les cartes qui manquaient à ta collection et remet les autres en vente avec une marge.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -34,7 +34,7 @@
     DRY_RUN: false,          // true = affiche ce qui serait fait, sans enchérir ni vendre
   };
 
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, window.__hp.jitter(ms, 0.3)));
   // Joueurs à ne jamais solliciter (ex. ton autre compte) : localStorage 'hp-excluded-players' = ["pseudo", …]
   const excludedPlayers = () => { try { return new Set(JSON.parse(localStorage.getItem('hp-excluded-players') || '[]').map((x) => String(x).toLowerCase())); } catch { return new Set(); } };
   const isExcluded = (u) => !!u && excludedPlayers().has(String(u).toLowerCase());
@@ -410,7 +410,7 @@
 
   paint();
   setInterval(paint, 2000);
-  setInterval(tick, CONFIG.POLL_S * 1000);
-  if (autoOn) setTimeout(tick, 3000);
+  window.__hp.schedule(tick, CONFIG.POLL_S * 1000);
+  if (autoOn) setTimeout(tick, window.__hp.jitter(3000, 0.5));
   addEventListener('beforeunload', () => { if (busy) releaseLock(); });
 })();

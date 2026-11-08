@@ -25,6 +25,8 @@ async function run(force) {
     localStorage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } },
     UI: new Proxy({ esc: (s) => String(s ?? ''), toast: (m) => toasts.push(m) }, { get: (t, p) => (p in t ? t[p] : () => {}) }),
     setInterval: () => 0, clearInterval: () => {}, setTimeout: (fn) => setTimeout(fn, 0),
+    // Stub du kit (injecté dans le build, absent du source testé) : planificateur inerte, comme setInterval ci-dessus
+    __hp: { jitter: (ms) => ms, schedule: () => ({ stop() {} }) },
     fetch: async (url, opts = {}) => {
       const p = url.replace(/^\/api/, '');
       const ok = (d) => ({ ok: true, status: 200, json: async () => d });

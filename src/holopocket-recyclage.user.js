@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Recyclage intelligent des doublons
 // @namespace    kevin.holopocket
-// @version      1.2
+// @version      1.3
 // @description  Recycle uniquement les doublons qui ne valent pas une mise aux enchères (vente nette après taxe pas assez supérieure à la valeur de recyclage). Garde toujours tes exemplaires et ignore les cartes verrouillées, favorites, recherchées, en vente, en échange, ou liées à un objectif ou une médaille.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -26,7 +26,7 @@
   const FALLBACK_VALUE = { C: 1, PC: 1, R: 3, SR: 10, UR: 30, L: 120 };
   const TIER_NAME = { C: 'Communes', PC: 'Peu communes', R: 'Rares', SR: 'Super rares', UR: 'Ultra rares', L: 'Légendaires' };
 
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, window.__hp.jitter(ms, 0.3)));
   // Cartes achetées par le script Achat-revente : il s'occupe lui-même de leur revente
   const flipReserved = () => { try { return new Set(JSON.parse(localStorage.getItem('hp-flip-reserved') || '[]')); } catch { return new Set(); } };
   let reserved = null;
@@ -275,6 +275,6 @@
 
   paint();
   setInterval(paint, 1000);
-  setInterval(autoTick, 60000);
-  if (autoOn) setTimeout(autoTick, 3000);
+  window.__hp.schedule(autoTick, 60000);
+  if (autoOn) setTimeout(autoTick, window.__hp.jitter(3000, 0.5));
 })();

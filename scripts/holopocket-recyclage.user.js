@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Recyclage intelligent des doublons
 // @namespace    kevin.holopocket
-// @version      1.2
+// @version      1.3
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-recyclage.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-recyclage.user.js
 // @description  Recycle uniquement les doublons qui ne valent pas une mise aux enchères (vente nette après taxe pas assez supérieure à la valeur de recyclage). Garde toujours tes exemplaires et ignore les cartes verrouillées, favorites, recherchées, en vente, en échange, ou liées à un objectif ou une médaille.
@@ -28,7 +28,7 @@
   const FALLBACK_VALUE = { C: 1, PC: 1, R: 3, SR: 10, UR: 30, L: 120 };
   const TIER_NAME = { C: 'Communes', PC: 'Peu communes', R: 'Rares', SR: 'Super rares', UR: 'Ultra rares', L: 'Légendaires' };
 
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, window.__hp.jitter(ms, 0.3)));
   // Cartes achetées par le script Achat-revente : il s'occupe lui-même de leur revente
   const flipReserved = () => { try { return new Set(JSON.parse(localStorage.getItem('hp-flip-reserved') || '[]')); } catch { return new Set(); } };
   let reserved = null;
@@ -160,6 +160,26 @@
     }
     return { done, coins, failed };
   }
+
+  // ───────── Délais aléatoires (commun à tous les scripts) ─────────
+  // Évite un rythme régulier : au lieu d'un intervalle fixe, chaque attente est tirée au hasard
+  // autour d'une valeur de base. jitter(ms, frac) renvoie ms ± frac (par défaut ±35 %).
+  // schedule(fn, base, frac) relance fn à base ± frac, replanifié à chaque tour (jamais périodique) ;
+  // il attend la fin de fn avant de reprogrammer (pas de chevauchement) et renvoie { stop() }.
+  const HP = (window.__hp = window.__hp || {});
+  HP.jitter = (ms, frac = 0.35) => Math.max(0, Math.round(Number(ms) * (1 + (Math.random() * 2 - 1) * frac)));
+  HP.schedule = function (fn, base, frac = 0.35) {
+    const h = { stopped: false, id: null };
+    const run = async () => {
+      if (h.stopped) return;
+      try { await fn(); } catch (_) { /* laissé à la charge de fn */ }
+      if (h.stopped) return;
+      h.id = setTimeout(run, HP.jitter(base, frac));
+    };
+    h.stop = () => { h.stopped = true; if (h.id) { clearTimeout(h.id); h.id = null; } };
+    h.id = setTimeout(run, HP.jitter(base, frac));
+    return h;
+  };
 
   // ───────── Interface HoloPocket+ (kit commun, identique dans tous les scripts) ─────────
   // Un dock en bas à droite (actions + interrupteurs), une colonne de panneaux à droite,
@@ -489,6 +509,6 @@
 
   paint();
   setInterval(paint, 1000);
-  setInterval(autoTick, 60000);
-  if (autoOn) setTimeout(autoTick, 3000);
+  window.__hp.schedule(autoTick, 60000);
+  if (autoOn) setTimeout(autoTick, window.__hp.jitter(3000, 0.5));
 })();

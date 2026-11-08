@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Achat des cartes manquantes bradées
 // @namespace    kevin.holopocket
-// @version      1.6
+// @version      1.7
 // @description  Mode auto : enchérit (mise minimale) sur les ventes qui se terminent dans moins de 5 min quand la carte te manque et qu'elle part à 70 % du prix moyen ou moins. N'achète rien pour revendre.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -28,7 +28,7 @@
     DRY_RUN: false,
   };
 
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, window.__hp.jitter(ms, 0.3)));
   const excludedPlayers = () => { try { return new Set(JSON.parse(localStorage.getItem('hp-excluded-players') || '[]').map((x) => String(x).toLowerCase())); } catch { return new Set(); } };
   const isExcluded = (u) => !!u && excludedPlayers().has(String(u).toLowerCase());
   async function api(method, path, body) {
@@ -293,7 +293,7 @@
 
   paint();
   setInterval(paint, 2000);
-  setInterval(tick, CONFIG.POLL_S * 1000);
-  if (autoOn) setTimeout(tick, 3000);
+  window.__hp.schedule(tick, CONFIG.POLL_S * 1000);
+  if (autoOn) setTimeout(tick, window.__hp.jitter(3000, 0.5));
   addEventListener('beforeunload', () => { if (busy) releaseLock(); });
 })();

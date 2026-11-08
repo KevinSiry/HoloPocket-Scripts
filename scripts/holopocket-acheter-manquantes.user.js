@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Enchérir sur mes cartes manquantes
 // @namespace    kevin.holopocket
-// @version      2.1
+// @version      2.2
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-acheter-manquantes.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-acheter-manquantes.user.js
 // @description  Bouton sur le Marché : enchérit (mise minimale) sur les cartes manquantes des séries en favori, seulement si l'enchère ne dépasse pas le prix habituel.
@@ -25,7 +25,7 @@
     DELAY: 400,             // pause entre deux enchères (ms)
   };
 
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, window.__hp.jitter(ms, 0.3)));
 
   // Joueurs à ne jamais solliciter (ex. ton autre compte) : localStorage 'hp-excluded-players' = ["pseudo", …]
   const excludedPlayers = () => { try { return new Set(JSON.parse(localStorage.getItem('hp-excluded-players') || '[]').map((x) => String(x).toLowerCase())); } catch { return new Set(); } };
@@ -135,6 +135,26 @@
     }
     return { chosen, total, candidates: picks.length, skipped };
   }
+
+  // ───────── Délais aléatoires (commun à tous les scripts) ─────────
+  // Évite un rythme régulier : au lieu d'un intervalle fixe, chaque attente est tirée au hasard
+  // autour d'une valeur de base. jitter(ms, frac) renvoie ms ± frac (par défaut ±35 %).
+  // schedule(fn, base, frac) relance fn à base ± frac, replanifié à chaque tour (jamais périodique) ;
+  // il attend la fin de fn avant de reprogrammer (pas de chevauchement) et renvoie { stop() }.
+  const HP = (window.__hp = window.__hp || {});
+  HP.jitter = (ms, frac = 0.35) => Math.max(0, Math.round(Number(ms) * (1 + (Math.random() * 2 - 1) * frac)));
+  HP.schedule = function (fn, base, frac = 0.35) {
+    const h = { stopped: false, id: null };
+    const run = async () => {
+      if (h.stopped) return;
+      try { await fn(); } catch (_) { /* laissé à la charge de fn */ }
+      if (h.stopped) return;
+      h.id = setTimeout(run, HP.jitter(base, frac));
+    };
+    h.stop = () => { h.stopped = true; if (h.id) { clearTimeout(h.id); h.id = null; } };
+    h.id = setTimeout(run, HP.jitter(base, frac));
+    return h;
+  };
 
   // ───────── Interface HoloPocket+ (kit commun, identique dans tous les scripts) ─────────
   // Un dock en bas à droite (actions + interrupteurs), une colonne de panneaux à droite,

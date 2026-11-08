@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.17
+// @version      3.18
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord, avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, et des pièces du compte une fois par heure, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
@@ -57,7 +57,7 @@
     DELAY: 200,          // pause entre deux joueurs scannés (ms)
   };
 
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, window.__hp.jitter(ms, 0.3)));
   // Pauses mémorisées dans localStorage : elles survivent au rechargement de la page
   const lsNum = (k) => { try { return +localStorage.getItem(k) || 0; } catch { return 0; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, String(v)); } catch {} };
@@ -677,6 +677,26 @@
     return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
   };
 
+  // ───────── Délais aléatoires (commun à tous les scripts) ─────────
+  // Évite un rythme régulier : au lieu d'un intervalle fixe, chaque attente est tirée au hasard
+  // autour d'une valeur de base. jitter(ms, frac) renvoie ms ± frac (par défaut ±35 %).
+  // schedule(fn, base, frac) relance fn à base ± frac, replanifié à chaque tour (jamais périodique) ;
+  // il attend la fin de fn avant de reprogrammer (pas de chevauchement) et renvoie { stop() }.
+  const HP = (window.__hp = window.__hp || {});
+  HP.jitter = (ms, frac = 0.35) => Math.max(0, Math.round(Number(ms) * (1 + (Math.random() * 2 - 1) * frac)));
+  HP.schedule = function (fn, base, frac = 0.35) {
+    const h = { stopped: false, id: null };
+    const run = async () => {
+      if (h.stopped) return;
+      try { await fn(); } catch (_) { /* laissé à la charge de fn */ }
+      if (h.stopped) return;
+      h.id = setTimeout(run, HP.jitter(base, frac));
+    };
+    h.stop = () => { h.stopped = true; if (h.id) { clearTimeout(h.id); h.id = null; } };
+    h.id = setTimeout(run, HP.jitter(base, frac));
+    return h;
+  };
+
   // ───────── Interface HoloPocket+ (kit commun, identique dans tous les scripts) ─────────
   // Un dock en bas à droite (actions + interrupteurs), une colonne de panneaux à droite,
   // et des notifications dans cette colonne. Styles calqués sur ceux du site (variables CSS du site).
@@ -1090,8 +1110,8 @@
     if (autoOn && !busy && openTrades < CONFIG.MAX_OPEN_TRADES && last && last.full) autoCycle(true);
   }
   setInterval(() => { if (location.pathname.startsWith('/echanges') || autoOn) countOpen(); }, 120000);
-  if (autoOn) setTimeout(() => autoCycle(), 5000);
-  setInterval(() => autoCycle(), 120000);
+  if (autoOn) setTimeout(() => autoCycle(), window.__hp.jitter(5000, 0.5));
+  window.__hp.schedule(() => autoCycle(), 120000);
   setTimeout(() => cancelStale(), 8000);
   setInterval(() => { if (!busy) cancelStale(); }, 5 * 60000);
   addEventListener('beforeunload', () => { if (busy && autoOn) releaseLock(); });

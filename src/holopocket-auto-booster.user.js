@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Ouverture auto dès que l'énergie suffit
 // @namespace    kevin.holopocket
-// @version      2.4
+// @version      2.5
 // @description  Surveille l'énergie en arrière-plan. Dès qu'elle suffit (énergie bonus comprise), ouvre 1 booster de la série favorite qui a le plus de chance de donner une nouvelle carte (ou d'une série fixe choisie dans le panel).
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -22,7 +22,7 @@
 
   const LS_KEY = 'hp-auto-booster-on';
   const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`);
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, window.__hp.jitter(ms, 0.3)));
 
   async function api(method, path, body) {
     const res = await fetch(`/api${path}`, {
@@ -153,14 +153,14 @@
     state.on = true;
     try { localStorage.setItem(LS_KEY, '1'); } catch {}
     tick();
-    clearInterval(timer);
-    timer = setInterval(tick, CONFIG.POLL_MS);
+    if (timer) timer.stop();
+    timer = window.__hp.schedule(tick, CONFIG.POLL_MS);
     render(null);
   }
   function stop(msg) {
     state.on = false;
     try { localStorage.setItem(LS_KEY, '0'); } catch {}
-    clearInterval(timer);
+    if (timer) timer.stop();
     if (msg) state.error = msg;
     render(null);
   }

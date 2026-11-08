@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Ouverture auto dès que l'énergie suffit
 // @namespace    kevin.holopocket
-// @version      2.4
+// @version      2.5
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-auto-booster.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-auto-booster.user.js
 // @description  Surveille l'énergie en arrière-plan. Dès qu'elle suffit (énergie bonus comprise), ouvre 1 booster de la série favorite qui a le plus de chance de donner une nouvelle carte (ou d'une série fixe choisie dans le panel).
@@ -24,7 +24,7 @@
 
   const LS_KEY = 'hp-auto-booster-on';
   const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`);
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, window.__hp.jitter(ms, 0.3)));
 
   async function api(method, path, body) {
     const res = await fetch(`/api${path}`, {
@@ -155,17 +155,37 @@
     state.on = true;
     try { localStorage.setItem(LS_KEY, '1'); } catch {}
     tick();
-    clearInterval(timer);
-    timer = setInterval(tick, CONFIG.POLL_MS);
+    if (timer) timer.stop();
+    timer = window.__hp.schedule(tick, CONFIG.POLL_MS);
     render(null);
   }
   function stop(msg) {
     state.on = false;
     try { localStorage.setItem(LS_KEY, '0'); } catch {}
-    clearInterval(timer);
+    if (timer) timer.stop();
     if (msg) state.error = msg;
     render(null);
   }
+
+  // ───────── Délais aléatoires (commun à tous les scripts) ─────────
+  // Évite un rythme régulier : au lieu d'un intervalle fixe, chaque attente est tirée au hasard
+  // autour d'une valeur de base. jitter(ms, frac) renvoie ms ± frac (par défaut ±35 %).
+  // schedule(fn, base, frac) relance fn à base ± frac, replanifié à chaque tour (jamais périodique) ;
+  // il attend la fin de fn avant de reprogrammer (pas de chevauchement) et renvoie { stop() }.
+  const HP = (window.__hp = window.__hp || {});
+  HP.jitter = (ms, frac = 0.35) => Math.max(0, Math.round(Number(ms) * (1 + (Math.random() * 2 - 1) * frac)));
+  HP.schedule = function (fn, base, frac = 0.35) {
+    const h = { stopped: false, id: null };
+    const run = async () => {
+      if (h.stopped) return;
+      try { await fn(); } catch (_) { /* laissé à la charge de fn */ }
+      if (h.stopped) return;
+      h.id = setTimeout(run, HP.jitter(base, frac));
+    };
+    h.stop = () => { h.stopped = true; if (h.id) { clearTimeout(h.id); h.id = null; } };
+    h.id = setTimeout(run, HP.jitter(base, frac));
+    return h;
+  };
 
   // ───────── Interface HoloPocket+ (kit commun, identique dans tous les scripts) ─────────
   // Un dock en bas à droite (actions + interrupteurs), une colonne de panneaux à droite,

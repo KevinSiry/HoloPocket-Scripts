@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Vendre mes doublons
 // @namespace    kevin.holopocket
-// @version      4.7
+// @version      4.8
 // @description  Marché : met en vente les doublons (prix conseillé, les plus chers d'abord), à la demande ou en mode auto qui remplit les slots dès qu'une place se libère.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -19,7 +19,7 @@
     DELAY: 400,           // pause entre deux mises en vente (ms)
   };
 
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, window.__hp.jitter(ms, 0.3)));
 
   // Même client que le site : fetch JSON, cookies de session same-origin
   async function api(method, path, body) {
@@ -210,7 +210,7 @@
       }
     } catch (e) { /* on réessaiera au prochain tour */ } finally { busy = false; paint(); }
   }
-  setInterval(autoTick, AUTO_POLL_MS);
+  window.__hp.schedule(autoTick, AUTO_POLL_MS);
 
   // ───────── Boutons du dock ─────────
   function paint() {

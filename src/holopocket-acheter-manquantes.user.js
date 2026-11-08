@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Enchérir sur mes cartes manquantes
 // @namespace    kevin.holopocket
-// @version      2.1
+// @version      2.2
 // @description  Bouton sur le Marché : enchérit (mise minimale) sur les cartes manquantes des séries en favori, seulement si l'enchère ne dépasse pas le prix habituel.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -23,7 +23,7 @@
     DELAY: 400,             // pause entre deux enchères (ms)
   };
 
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const sleep = (ms) => new Promise((r) => setTimeout(r, window.__hp.jitter(ms, 0.3)));
 
   // Joueurs à ne jamais solliciter (ex. ton autre compte) : localStorage 'hp-excluded-players' = ["pseudo", …]
   const excludedPlayers = () => { try { return new Set(JSON.parse(localStorage.getItem('hp-excluded-players') || '[]').map((x) => String(x).toLowerCase())); } catch { return new Set(); } };

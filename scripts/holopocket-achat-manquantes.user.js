@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Achat des cartes manquantes bradées
 // @namespace    kevin.holopocket
-// @version      1.1
+// @version      1.2
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-manquantes.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-manquantes.user.js
 // @description  Mode auto : enchérit (mise minimale) sur les ventes qui se terminent dans moins de 5 min quand la carte te manque et qu'elle part à 70 % du prix moyen ou moins. N'achète rien pour revendre.
@@ -110,6 +110,7 @@
       if (!a) { delete S.tracked[id]; continue; }
       if (a.status === 'active') { t.endsAt = a.endsAt; continue; }
       delete S.tracked[id];
+      ownedCache.delete(keyOf(t.cardId, t.reverse));
       if (a.status === 'sold' && a.highestBidder === me.username) {
         S.stats.won++; S.stats.spent += a.currentPrice; S.stats.saved += Math.max(0, (t.ref || 0) - a.currentPrice);
         note(`Gagnée : ${t.name} pour ${a.currentPrice} (prix moyen ${t.ref})`);
@@ -135,6 +136,10 @@
     const leading = myBids.filter((a) => a.isLeading);
     const engaged = leading.reduce((s, a) => s + (a.currentPrice || 0), 0);
     const leadKeys = new Set(leading.map((a) => keyOf(a.card?.id ?? a.cardId, a.reverse)));
+    // Une carte déjà visée par une enchère que je suis (même si on m'a surenchéri, ou si le site n'affiche pas encore ma mise) :
+    // aucune autre vente de cette carte, seule cette enchère-là peut être relancée.
+    const aimedAt = new Map(Object.entries(S.tracked).map(([id, t]) => [keyOf(t.cardId, t.reverse), String(id)]));
+    for (const a of myBids) aimedAt.set(keyOf(a.card?.id ?? a.cardId, a.reverse), String(a.id));
     const escrow = (() => { try { return localStorage.getItem(ESCROW_KEY) === '1'; } catch { return false; } })();
     const freeBal = (me.balance || 0) - (escrow ? 0 : engaged);
     let budget = Math.min(CONFIG.MAX_ENGAGED - engaged, freeBal - CONFIG.RESERVE);
@@ -148,6 +153,8 @@
       if (end <= now + 10000 || end > deadline) return false;
       if (a.reverse && !CONFIG.INCLUDE_REVERSE) return false;
       if (leadKeys.has(keyOf(a.card.id, a.reverse))) return false;
+      const aim = aimedAt.get(keyOf(a.card.id, a.reverse));
+      if (aim && aim !== String(a.id)) return false; // déjà une enchère sur cette carte ailleurs
       const shown = a.reverse ? a.card.reverseMarketValue : a.card.marketValue;
       return shown > 0 && a.minBid <= maxBidFor(shown);
     });
@@ -162,7 +169,7 @@
       picks.push({ a, ref: info.ref, max, saving: info.ref - a.minBid });
     }
     picks.sort((x, y) => y.saving - x.saving || x.a.minBid - y.a.minBid);
-    const seen = new Set(leadKeys);
+    const seen = new Set([...leadKeys, ...[...aimedAt.keys()].filter((k) => !picks.some((p) => keyOf(p.a.card.id, p.a.reverse) === k && String(p.a.id) === aimedAt.get(k)))]);
     let placed = 0;
     for (const p of picks) {
       if (placed >= CONFIG.MAX_BIDS_PER_PASS) break;

@@ -19,6 +19,7 @@ Chaque script contient `@updateURL` : Tampermonkey récupère tout seul les nouv
 | Assistant Coffre | 2.0 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-coffre.user.js) |
 | Assistant Connexions | 2.0 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-connexions.user.js) |
 | Échanges équitables | 3.18 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js) |
+| Stratège du Conseil 4 (Ligue : meilleur booster / Super Bonbon, mode auto) | 1.0 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-ligue.user.js) |
 | Recyclage intelligent des doublons | 1.3 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-recyclage.user.js) |
 | Vendre mes doublons | 4.8 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-vendre-doublons.user.js) |
 | Assistant Les Voisins | 2.0 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-voisins.user.js) |

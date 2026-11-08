@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         HoloPocket – Achat des cartes manquantes bradées
 // @namespace    kevin.holopocket
-// @version      1.0
-// @description  Mode auto : enchérit (mise minimale) sur les ventes qui se terminent dans moins de 5 min quand la carte te manque et qu'elle part à 50 % du prix moyen ou moins. N'achète rien pour revendre.
+// @version      1.1
+// @description  Mode auto : enchérit (mise minimale) sur les ventes qui se terminent dans moins de 5 min quand la carte te manque et qu'elle part à 70 % du prix moyen ou moins. N'achète rien pour revendre.
 // @match        https://holopocket.fr/*
 // @grant        none
 // @run-at       document-idle
@@ -14,10 +14,10 @@
   // ───────── Réglages ─────────
   const CONFIG = {
     MAX_ENDS_IN_MIN: 5,      // seulement les ventes qui se terminent dans moins de 5 min
-    MAX_PRICE_RATIO: 0.50,   // mise maximale : 50 % du prix moyen de la carte
+    MAX_PRICE_RATIO: 0.70,   // mise maximale : 70 % du prix moyen de la carte
     MIN_SALES: 3,            // la carte doit s'être vendue au moins 3 fois sur 7 jours (prix moyen fiable)
-    RESERVE: 100,            // pièces jamais engagées
-    MAX_ENGAGED: 1000,       // total maximum engagé en même temps dans des enchères
+    RESERVE: 0,              // pièces jamais engagées (0 = tout le solde peut servir)
+    MAX_ENGAGED: Infinity,   // pas de plafond : seul le solde limite
     MAX_BIDS_PER_PASS: 10,
     INCLUDE_REVERSE: true,   // viser aussi les versions reverse manquantes
     POLL_S: 15,
@@ -237,14 +237,14 @@
       ${tracked.map((t) => `<div style="font-size:12.5px;padding:2px 0">${esc(t.name)} — mise ${t.bid} · prix moyen ${t.ref}</div>`).join('') || '<div class="hp-muted" style="font-size:12.5px">Aucune</div>'}
       <div style="margin-top:10px;font-weight:700;font-size:13px">Journal</div>
       <div style="max-height:180px;overflow:auto;font-size:12px" class="hp-muted">${S.log.slice().reverse().slice(0, 25).map((l) => `<div>${new Date(l.at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} · ${esc(l.text)}</div>`).join('') || 'Rien pour l’instant'}</div>
-      <div class="hp-muted" style="font-size:11.5px;margin-top:10px">Cartes que tu n'as pas · ventes finissant dans ${CONFIG.MAX_ENDS_IN_MIN} min max · mise ≤ ${Math.round(CONFIG.MAX_PRICE_RATIO * 100)} % du prix moyen · réserve ${CONFIG.RESERVE} · ${CONFIG.MAX_ENGAGED} engagées max${CONFIG.DRY_RUN ? ' · <b>TEST À BLANC</b>' : ''}</div>`;
+      <div class="hp-muted" style="font-size:11.5px;margin-top:10px">Cartes que tu n'as pas · ventes finissant dans ${CONFIG.MAX_ENDS_IN_MIN} min max · mise ≤ ${Math.round(CONFIG.MAX_PRICE_RATIO * 100)} % du prix moyen · tout le solde disponible peut être engagé${CONFIG.DRY_RUN ? ' · <b>TEST À BLANC</b>' : ''}</div>`;
   }
 
   function paint() {
     const sub = !autoOn ? 'Désactivé' : `${status.bids} en tête · ${status.engaged} engagées · ${S.stats.won} gagnée${S.stats.won > 1 ? 's' : ''}`;
     UI.button('hp-miss-auto', {
       label: 'Cartes manquantes', sub, icon: 'coins', kind: 'toggle', on: autoOn, order: 95, busy: busy && autoOn,
-      title: 'Enchérit sur les cartes qui te manquent quand elles partent à 50 % du prix moyen ou moins',
+      title: 'Enchérit sur les cartes qui te manquent quand elles partent à 70 % du prix moyen ou moins',
       onClick: () => {
         autoOn = !autoOn;
         try { localStorage.setItem(AUTO_KEY, autoOn ? '1' : '0'); } catch {}

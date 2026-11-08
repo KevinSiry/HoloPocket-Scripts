@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         HoloPocket – Ouverture auto quand l'énergie est pleine
+// @name         HoloPocket – Ouverture auto dès que l'énergie suffit
 // @namespace    kevin.holopocket
-// @version      2.2
-// @description  Surveille l'énergie en arrière-plan. Dès qu'elle atteint le plafond, ouvre 1 booster de la série favorite qui a le plus de chance de donner une nouvelle carte (ou d'une série fixe choisie dans le panel).
+// @version      2.3
+// @description  Surveille l'énergie en arrière-plan. Dès qu'elle suffit (énergie bonus comprise), ouvre 1 booster de la série favorite qui a le plus de chance de donner une nouvelle carte (ou d'une série fixe choisie dans le panel).
 // @match        https://holopocket.fr/*
 // @grant        none
 // @run-at       document-idle
@@ -14,7 +14,7 @@
   // ───────── Réglages ─────────
   const CONFIG = {
     COUNT_REVERSE: true,     // une reverse manquante compte comme une nouvelle carte
-    KEEP_BONUS: true,        // ne pas puiser dans l'énergie bonus, seulement le stock qui se régénère
+    KEEP_BONUS: false,       // false = l'énergie bonus sert aussi (true = seulement le stock qui se régénère)
     POLL_MS: 30000,          // fréquence de vérification de l'énergie (ms)
     MAX_OPENS: Infinity,     // plafond d'ouvertures auto par session (Infinity = sans limite)
     AUTO_START: false,       // démarrer la surveillance dès le chargement de la page
@@ -107,6 +107,12 @@
   }
 
   // ───────── État & boucle ─────────
+  // Énergie bonus : le champ exact dépend du site, on prend le premier nombre dont le nom contient « bonus »
+  function bonusOf(p) {
+    for (const [k, v] of Object.entries(p || {})) if (/bonus/i.test(k) && !/max|next|at$|until|expires/i.test(k) && typeof v === 'number' && v > 0) return v;
+    return 0;
+  }
+  const usable = (p) => (p.stock || 0) + (CONFIG.KEEP_BONUS ? 0 : bonusOf(p));
   const state = { on: false, busy: false, opens: 0, lastCards: [], lastSet: null, nextCheck: 0, error: null };
 
   async function tick() {
@@ -118,11 +124,12 @@
       render(packs);
       if (me.quarantined) { stop(`Compte en quarantaine — surveillance stoppée.`); return; }
 
-      // Énergie au plafond → on ouvre pour ne rien gaspiller
-      while (state.on && packs.stock >= packs.max && state.opens < CONFIG.MAX_OPENS) {
+      // Dès que l'énergie (bonus comprise) couvre le coût d'un booster, on ouvre
+      while (state.on && packs.stock != null && usable(packs) >= (state.lastCost || 1) && state.opens < CONFIG.MAX_OPENS) {
         const best = await pickBestSet();
         if (!best) { stop('Aucune série en favori (et aucun booster par défaut).'); return; }
-        if (best.cost > packs.stock) break;
+        state.lastCost = best.cost;
+        if (best.cost > usable(packs)) break;
         const res = await openOne(best);
         state.opens++;
         state.lastSet = best;
@@ -169,7 +176,8 @@
   function render(packs) {
     if (packs) state.packs = { ...(state.packs || {}), ...packs };
     const p = state.packs || {};
-    let energy = p.stock != null ? `Énergie ${p.stock}/${p.max}` : '';
+    const bonus = bonusOf(p);
+    let energy = p.stock != null ? `Énergie ${p.stock}/${p.max}${bonus ? ` + ${bonus} bonus` : ''}` : '';
     if (p.stock != null && p.stock < p.max && p.nextAt) {
       const next = Math.max(0, Math.round((new Date(p.nextAt) - Date.now()) / 1000));
       energy += ` · +1 dans ${mmss(next)}`;
@@ -177,8 +185,8 @@
     UI.button('hp-auto-btn', {
       label: 'Auto-ouverture',
       sub: state.on ? (energy || 'Surveillance de l’énergie') : `Désactivée${p.stock != null ? ` · énergie ${p.stock}/${p.max}` : ''}`,
-      icon: 'zap', kind: 'toggle', on: state.on, order: 90, busy: state.busy && state.on && p.stock >= p.max,
-      title: 'Ouvre un booster dès que l’énergie est pleine (série favorite la plus utile)',
+      icon: 'zap', kind: 'toggle', on: state.on, order: 90, busy: state.busy && state.on,
+      title: 'Ouvre un booster dès que l’énergie (bonus comprise) suffit, série favorite la plus utile',
       onClick: () => (state.on ? stop() : start()),
     });
     // Nouvelle ouverture → notification avec les cartes obtenues

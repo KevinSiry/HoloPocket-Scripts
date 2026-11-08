@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Stratège du Conseil 4
 // @namespace    kevin.holopocket
-// @version      1.1
+// @version      1.2
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-ligue.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-ligue.user.js
 // @description  Conseil 4 (Ligue) : calcule à chaque coup le booster à ouvrir (ou le Super Bonbon à poser) qui maximise la chance de finir 2 quêtes sur 3 chez chaque membre et de battre les quatre avec l'énergie de Ligue. Mode conseil (surligne le booster) ou mode auto (joue l'essai coup par coup).
@@ -623,10 +623,12 @@
   // ───── Écoute des réponses du site : chaque coup joué (par toi ou par le script) met à jour les chances ─────
   // Les actions de la Ligue (ouvrir, bonbon, suivant…) renvoient toute la vue : on la lit au passage.
   const LIGUE_RE = /\/api\/tour\/[^/?#]+\/ligue(?:\/(?:open|candy|next|abandon|start))?(?:[?#]|$)/;
-  if (!window.__hpLigueHook) {
-    window.__hpLigueHook = true;
-    const orig = window.fetch;
-    window.fetch = async function (input, init) {
+  // Selon le navigateur, Tampermonkey peut isoler le script : on accroche le fetch de la page elle-même.
+  const PAGE = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+  if (!PAGE.__hpLigueHook) {
+    PAGE.__hpLigueHook = true;
+    const orig = PAGE.fetch;
+    PAGE.fetch = async function (input, init) {
       const res = await orig.apply(this, arguments);
       try {
         const url = typeof input === 'string' ? input : (input && input.url) || '';
@@ -637,6 +639,26 @@
       return res;
     };
   }
+
+  // ───── Filet de sécurité : si l'affichage de la Ligue change (barres, énergie, membre),
+  // on relit l'état (au plus une fois par seconde et demie), même si l'écoute ci-dessus n'a rien vu.
+  let domTimer = null, domGetAt = 0;
+  function onDomChange() {
+    if (!region() || busy) return;
+    clearTimeout(domTimer);
+    domTimer = setTimeout(async () => {
+      if (Date.now() - lastViewAt < 1200 || Date.now() - domGetAt < 1500) return;
+      domGetAt = Date.now();
+      try { await refresh(); } catch (_) {}
+    }, 700);
+  }
+  new MutationObserver((muts) => {
+    for (const m of muts) {
+      const el = m.target.nodeType === 1 ? m.target : m.target.parentElement;
+      if (el && !el.closest('#hp-panels,#hp-dock') && el.closest('.lg-main,.lg-top,[class*="lg-"]')) { onDomChange(); return; }
+    }
+  }).observe(document.body, { subtree: true, childList: true, characterData: true });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) onDomChange(); });
 
   async function refresh() {
     const r = region();

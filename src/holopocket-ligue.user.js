@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Stratège du Conseil 4
 // @namespace    kevin.holopocket
-// @version      1.0
+// @version      1.1
 // @description  Conseil 4 (Ligue) : calcule à chaque coup le booster à ouvrir (ou le Super Bonbon à poser) qui maximise la chance de finir 2 quêtes sur 3 chez chaque membre et de battre les quatre avec l'énergie de Ligue. Mode conseil (surligne le booster) ou mode auto (joue l'essai coup par coup).
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -256,8 +256,9 @@
   const pct = (x) => (x * 100).toLocaleString('fr-FR', { maximumFractionDigits: 1 }) + ' %';
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+  const rawFetch = window.fetch.bind(window);
   async function api(method, path, body) {
-    const res = await fetch(`/api${path}`, {
+    const res = await rawFetch(`/api${path}`, {
       method,
       credentials: 'same-origin',
       headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
@@ -363,42 +364,105 @@
     highlight(best);
   }
 
-  let busy = false, lastView = null, lastPlan = null;
+  let busy = false, lastView = null, lastPlan = null, lastViewAt = 0;
+  const viewWaiters = [];
 
-  async function refresh() {
-    const r = region();
-    if (!r) return null;
-    const view = await api('GET', `/tour/${encodeURIComponent(r)}/ligue`);
+  // Recalcule le plan à partir d'une vue de la Ligue (venant de notre GET ou d'une réponse du site)
+  function applyView(view) {
+    if (!view || !region()) return;
     lastView = view;
+    lastViewAt = Date.now();
     const run = view.run;
     if (run && run.stages && run.stages[run.current]) { try { track(run); } catch (_) {} }
     lastPlan = run && run.status === 'playing' && run.stages[run.current] && !run.stages[run.current].hidden ? plan(view) : null;
     render(view, lastPlan);
     if (!lastPlan && lsGet(AUTO_KEY, false)) setAuto(false);
     drawButtons();
+    viewWaiters.splice(0).forEach((w) => w(view));
+  }
+  const nextView = (ms) => new Promise((res) => {
+    const t = setTimeout(() => { const i = viewWaiters.indexOf(done); if (i >= 0) viewWaiters.splice(i, 1); res(null); }, ms);
+    const done = (v) => { clearTimeout(t); res(v); };
+    viewWaiters.push(done);
+  });
+
+  // ───── Écoute des réponses du site : chaque coup joué (par toi ou par le script) met à jour les chances ─────
+  // Les actions de la Ligue (ouvrir, bonbon, suivant…) renvoient toute la vue : on la lit au passage.
+  const LIGUE_RE = /\/api\/tour\/[^/?#]+\/ligue(?:\/(?:open|candy|next|abandon|start))?(?:[?#]|$)/;
+  if (!window.__hpLigueHook) {
+    window.__hpLigueHook = true;
+    const orig = window.fetch;
+    window.fetch = async function (input, init) {
+      const res = await orig.apply(this, arguments);
+      try {
+        const url = typeof input === 'string' ? input : (input && input.url) || '';
+        if (res.ok && LIGUE_RE.test(new URL(url, location.href).pathname)) {
+          res.clone().json().then((d) => { if (d && 'run' in d) applyView(d); }).catch(() => {});
+        }
+      } catch (_) {}
+      return res;
+    };
+  }
+
+  async function refresh() {
+    const r = region();
+    if (!r) return null;
+    applyView(await api('GET', `/tour/${encodeURIComponent(r)}/ligue`));
     return lastPlan;
+  }
+
+  // ───── Jouer un coup en cliquant les boutons du site (l'affichage du site reste à jour, sans recharger) ─────
+  const findBtn = (root, re) => root && [...root.querySelectorAll('button')].find((b) => re.test(b.textContent.replace(/\s+/g, ' ').trim()));
+  const ready = (b) => b && !b.disabled && b.getAttribute('aria-busy') !== 'true';
+  async function waitFor(fn, ms) {
+    const t0 = Date.now();
+    for (;;) { const x = fn(); if (x) return x; if (Date.now() - t0 > ms) return null; await sleep(150); }
+  }
+  function buttonFor(a) {
+    if (a.type === 'open') return findBtn(document.querySelector(`.lg-set[data-set="${CSS.escape(a.setId)}"]`), /^Ouvrir\b/);
+    if (a.type === 'candy') return document.querySelector(`.lg-quest[data-q="${a.quest}"] .lg-candy-btn`);
+    if (a.type === 'next') return findBtn(document, /^Affronter\b/);
+    return null;
+  }
+  async function act(a) {
+    const btn = await waitFor(() => { const b = buttonFor(a); return ready(b) ? b : null; }, 6000);
+    if (btn) {
+      const wait = nextView(12000);
+      btn.click();
+      if (a.type === 'candy') {
+        // fenêtre de confirmation du site : « L'utiliser »
+        const ok = await waitFor(() => { const b = findBtn(document, /L.utiliser$/); return ready(b) ? b : null; }, 4000);
+        if (!ok) throw new Error('confirmation du Super Bonbon introuvable');
+        ok.click();
+      }
+      if (await wait) return;
+      await refresh(); // le site n'a rien renvoyé d'exploitable : relecture directe
+      return;
+    }
+    // Bouton introuvable (page pas encore dessinée…) : appel direct, puis relecture
+    const r = encodeURIComponent(region());
+    if (a.type === 'next') await api('POST', `/tour/${r}/ligue/next`);
+    else if (a.type === 'candy') await api('POST', `/tour/${r}/ligue/candy`, { quest: a.quest });
+    else await api('POST', `/tour/${r}/ligue/open`, { setId: a.setId, count: 1 });
+    await refresh();
+    UI.toast("Coup joué hors des boutons du site : son affichage peut avoir un coup de retard (l'aperçu ci-contre est à jour).", { kind: 'info' });
   }
 
   async function play() {
     if (busy) return;
     busy = true; drawButtons();
     try {
-      const p = await refresh();
+      const p = Date.now() - lastViewAt < 4000 ? lastPlan : await refresh();
       if (!p) return;
       const a = p.res.actions[0];
       if (!a) { UI.toast("Plus aucun coup utile : l'essai est perdu.", { kind: 'error' }); setAuto(false); return; }
-      const r = encodeURIComponent(region());
-      if (a.type === 'next') await api('POST', `/tour/${r}/ligue/next`);
-      else if (a.type === 'candy') await api('POST', `/tour/${r}/ligue/candy`, { quest: a.quest });
-      else await api('POST', `/tour/${r}/ligue/open`, { setId: a.setId, count: 1 });
-      // Recharge pour resynchroniser l'affichage du site (le mode auto reprend tout seul après)
-      await sleep(400);
-      location.reload();
+      await act(a);
     } catch (e) {
       UI.toast('Ligue : ' + UI.esc(e.message), { kind: 'error', ms: 0 });
       setAuto(false);
     } finally {
       busy = false; drawButtons();
+      if (lsGet(AUTO_KEY, false)) schedulePlay();
     }
   }
 

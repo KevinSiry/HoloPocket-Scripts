@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.15
+// @version      3.16
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord, avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, et des pièces du compte une fois par heure, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
@@ -194,7 +194,8 @@
     return { asked, offered, pendingTo, openSent, lastByPlayer, promisedIds, sendTimes: [...new Set(sendTimes)].sort((a, b) => a - b) };
   }
 
-  // Annule les propositions envoyées restées sans réponse depuis plus de CANCEL_AFTER_H
+  // Annule les propositions envoyées restées sans réponse depuis plus de CANCEL_AFTER_H, ainsi que celles qui ne tiennent plus
+  // (mon dernier exemplaire proposé, ou une carte demandée que je possède déjà). Les échanges vers le joueur prioritaire sont exclus.
   const CANCEL_KEY = 'hp-trade-cancel-last';
   async function cancelStale(force) {
     try {
@@ -208,6 +209,38 @@
     const old = sent.filter(t => t.status === 'pending' && t.id != null && (!t.from || !myName || t.from === myName)
       && Date.now() - (Date.parse(t.createdAt) || Date.now()) > CONFIG.CANCEL_AFTER_H * H);
     let n = 0;
+    // Propositions encore en attente dont la situation a changé : mon dernier exemplaire est proposé, ou une carte demandée est déjà à moi
+    const live = sent.filter((t) => t.status === 'pending' && t.id != null && (!t.from || !myName || t.from === myName) && !old.includes(t) && !isPriority(t.to));
+    const copiesOf = new Map(); // fiche de carte lue une seule fois par contrôle
+    const owned = async (c, reverse) => {
+      if (!copiesOf.has(c.id)) { try { copiesOf.set(c.id, (await api('GET', `/cards/${encodeURIComponent(c.id)}`)).mine || {}); } catch { copiesOf.set(c.id, null); } await sleep(CONFIG.DELAY / 2); }
+      const m = copiesOf.get(c.id);
+      if (!m) return null; // illisible : on ne touche à rien
+      return reverse ? (m.reverseCopies || 0) : (m.copies || 0) - (m.reverseCopies || 0);
+    };
+    const invalid = [];
+    for (const t of live) {
+      let why = null;
+      for (const x of t.offered || []) { // mon côté : un seul exemplaire possédé = le dernier, on ne le donne pas
+        const c = x.card || x; if (!c || !c.id) continue;
+        const k = await owned(c, !!(x.reverse ?? c.reverse));
+        if (k != null && k <= 1) { why = `dernier exemplaire de ${c.name || c.id}`; break; }
+      }
+      if (!why) for (const x of t.requested || []) { // leur côté : une carte demandée que j'ai déjà
+        const c = x.card || x; if (!c || !c.id) continue;
+        const k = await owned(c, !!(x.reverse ?? c.reverse));
+        if (k != null && k >= 1) { why = `${c.name || c.id} déjà possédée`; break; }
+      }
+      if (why) invalid.push({ t, why });
+    }
+    for (const { t, why } of invalid) {
+      try {
+        await api('POST', `/trades/${t.id}/cancel`); n++;
+        UI.toast(`<b>Échanges</b> : proposition à ${esc(t.to)} annulée (${esc(why)})`, { kind: 'info', ms: 10000 });
+      } catch {}
+      await sleep(CONFIG.DELAY);
+    }
+    const nInvalid = n;
     for (const t of old) {
       try {
         await api('POST', `/trades/${t.id}/cancel`); n++;
@@ -218,7 +251,7 @@
     }
     if (n) {
       if (openTrades != null) openTrades = Math.max(0, openTrades - n);
-      UI.toast(`<b>Échanges</b> : ${n} proposition(s) sans réponse depuis plus de ${CONFIG.CANCEL_AFTER_H} h annulée(s)`, { kind: 'info', ms: 10000 });
+      if (n > nInvalid) UI.toast(`<b>Échanges</b> : ${n - nInvalid} proposition(s) sans réponse depuis plus de ${CONFIG.CANCEL_AFTER_H} h annulée(s)`, { kind: 'info', ms: 10000 });
     }
     return n;
   }

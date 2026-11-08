@@ -94,8 +94,99 @@ function toast(text, bad) {
   setTimeout(() => t.remove(), bad ? 8000 : 4000);
 }
 
-function setOptions(sel, sets) {
-  for (const x of sets.filter((x) => !x.promo)) { const o = el('option', null, x.name + (x.favorite ? ' ★' : '')); o.value = `set:${x.id}`; sel.append(o); }
+// Séries proposées dans la liste du booster (hors promos), favoris marqués ★
+const setChoices = (sets) => sets.filter((x) => !x.promo).map((x) => ({ value: `set:${x.id}`, label: x.name + (x.favorite ? ' ★' : ''), search: `${x.name} ${x.id}` }));
+// Recherche sans tenir compte des accents ni de la casse
+const fold_ = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+// Liste déroulante avec barre de recherche (un <select> natif ne peut pas en contenir).
+// pinned : choix toujours en tête (Global, Auto) ; choices : séries filtrées par la recherche.
+// Clavier : ↑ ↓ pour se déplacer, Entrée pour choisir, Échap pour fermer.
+let comboSeq = 0;
+function searchSelect({ label, value, pinned = [], choices, onChange }) {
+  const id = `cb${++comboSeq}`;
+  const all = [...pinned, ...choices];
+  const root = el('div', 'combo');
+  const btn = el('button', 'combo-btn'); btn.type = 'button';
+  btn.setAttribute('aria-haspopup', 'listbox'); btn.setAttribute('aria-expanded', 'false'); btn.setAttribute('aria-label', label);
+  const cur = el('span', 'combo-cur');
+  btn.append(cur, el('span', 'combo-caret', '▾'));
+  const pop = el('div', 'combo-pop'); pop.hidden = true;
+  const q = el('input'); q.type = 'text'; q.placeholder = 'Rechercher une série…'; q.autocomplete = 'off'; q.spellcheck = false;
+  q.setAttribute('role', 'combobox'); q.setAttribute('aria-expanded', 'true'); q.setAttribute('aria-autocomplete', 'list');
+  q.setAttribute('aria-controls', `${id}-list`); q.setAttribute('aria-label', `${label} : rechercher une série`);
+  const list = el('ul', 'combo-list'); list.id = `${id}-list`; list.setAttribute('role', 'listbox'); list.setAttribute('aria-label', label);
+  const empty = el('p', 'muted combo-empty', 'Aucune série trouvée'); empty.hidden = true;
+  empty.setAttribute('role', 'status');
+  pop.append(q, list, empty);
+  root.append(btn, pop);
+
+  let shown = [], active = -1;
+  const showCur = () => { const c = all.find((x) => x.value === value); cur.textContent = c ? c.label : value; };
+  const setActive = (i) => {
+    active = i;
+    [...list.children].forEach((li, k) => { li.classList.toggle('active', k === i); li.setAttribute('aria-selected', String(k === i)); });
+    const li = list.children[i];
+    if (li) { q.setAttribute('aria-activedescendant', li.id); li.scrollIntoView({ block: 'nearest' }); } else q.removeAttribute('aria-activedescendant');
+  };
+  const render = (onCurrent) => {
+    const t = fold_(q.value.trim());
+    shown = t ? all.filter((c) => fold_(c.search || c.label).includes(t)) : all;
+    list.replaceChildren(...shown.map((c, k) => {
+      const li = el('li', c.value === value ? 'cur' : null, c.label);
+      li.id = `${id}-o${k}`; li.setAttribute('role', 'option');
+      li.addEventListener('mousedown', (e) => e.preventDefault()); // garde le focus dans la recherche
+      li.addEventListener('click', () => pick(c));
+      li.addEventListener('mousemove', () => { if (active !== k) setActive(k); });
+      return li;
+    }));
+    empty.hidden = shown.length > 0;
+    const i = onCurrent ? shown.findIndex((c) => c.value === value) : 0;
+    setActive(shown.length ? Math.max(0, i) : -1);
+  };
+  // Position fixe sous le bouton (les cartes coupent ce qui dépasse), au-dessus s'il manque de place
+  const place = () => {
+    const r = btn.getBoundingClientRect(), vw = document.documentElement.clientWidth, vh = window.innerHeight;
+    const w = Math.min(Math.max(r.width, 288), vw - 16);
+    pop.style.width = `${w}px`;
+    pop.style.left = `${Math.max(8, Math.min(r.left, vw - w - 8))}px`;
+    const below = vh - r.bottom, h = pop.offsetHeight;
+    if (below < h + 12 && r.top > below) { pop.style.top = ''; pop.style.bottom = `${vh - r.top + 6}px`; }
+    else { pop.style.bottom = ''; pop.style.top = `${r.bottom + 6}px`; }
+  };
+  const onOutside = (e) => { if (!root.contains(e.target)) close(false); };
+  const onScroll = (e) => { if (!pop.contains(e.target)) close(false); };
+  const open = () => {
+    if (!pop.hidden) return;
+    pop.hidden = false; root.classList.add('open'); btn.setAttribute('aria-expanded', 'true');
+    q.value = ''; render(true); place(); q.focus();
+    document.addEventListener('pointerdown', onOutside, true);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', place);
+  };
+  const close = (refocus) => {
+    if (pop.hidden) return;
+    pop.hidden = true; root.classList.remove('open'); btn.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('pointerdown', onOutside, true);
+    window.removeEventListener('scroll', onScroll, true);
+    window.removeEventListener('resize', place);
+    if (refocus) btn.focus();
+  };
+  const pick = (c) => { close(true); if (c.value !== value) { value = c.value; showCur(); onChange(c.value); } };
+
+  btn.addEventListener('click', () => (pop.hidden ? open() : close(true)));
+  btn.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); open(); } });
+  q.addEventListener('input', () => render(false));
+  q.addEventListener('keydown', (e) => {
+    const n = shown.length;
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (n) setActive((active + 1) % n); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (n) setActive((active - 1 + n) % n); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (shown[active]) pick(shown[active]); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true); }
+    else if (e.key === 'Tab') close(false);
+  });
+  showCur();
+  return root;
 }
 const describe = (c, sets) => (c.mode === 'fixed' ? (sets.find((x) => x.id === c.setId) || { name: c.setId }).name : 'Auto (meilleur favori)');
 // valeur du <select> <-> choix
@@ -111,14 +202,13 @@ function boosterBlock(bot, card, globalChoice) {
   const sets = openSets._any || [];
   const box = el('div', 'block');
   box.append(el('h3', null, 'Booster à ouvrir'));
-  const sel = el('select');
-  sel.setAttribute('aria-label', `Booster du compte ${bot.name}`);
-  const g = el('option', null, `Global : ${describe(globalChoice, sets)}`); g.value = 'global';
-  const a = el('option', null, 'Auto (meilleur favori)'); a.value = 'auto';
-  sel.append(g, a);
-  setOptions(sel, sets);
-  sel.value = toValue(bot.booster.choice);
-  sel.addEventListener('change', () => { sel.blur(); act(card, () => sendBooster(`/api/bots/${encodeURIComponent(bot.name)}/booster`, sel.value)); });
+  const sel = searchSelect({
+    label: `Booster du compte ${bot.name}`,
+    value: toValue(bot.booster.choice),
+    pinned: [{ value: 'global', label: `Global : ${describe(globalChoice, sets)}` }, { value: 'auto', label: 'Auto (meilleur favori)' }],
+    choices: setChoices(sets),
+    onChange: (v) => act(card, () => sendBooster(`/api/bots/${encodeURIComponent(bot.name)}/booster`, v)),
+  });
   box.append(el('div', 'row', null));
   box.lastChild.append(sel);
   if (bot.booster.error) box.append(el('p', 'err', `Non appliqué : ${bot.booster.error}`));
@@ -129,16 +219,16 @@ function boosterBlock(bot, card, globalChoice) {
 function globalBar(globalChoice, bots) {
   const bar = el('div', 'bar-item');
   const sets = openSets._any || [];
-  const lab = el('label', 'inline');
+  const lab = el('div', 'inline');
   lab.append(el('span', 'k', 'Booster de tous les comptes'));
-  const sel = el('select');
-  sel.setAttribute('aria-label', 'Booster global');
-  const a = el('option', null, 'Auto (meilleur favori)'); a.value = 'auto';
-  sel.append(a);
-  setOptions(sel, sets);
-  sel.value = toValue(globalChoice);
+  const sel = searchSelect({
+    label: 'Booster global',
+    value: toValue(globalChoice),
+    pinned: [{ value: 'auto', label: 'Auto (meilleur favori)' }],
+    choices: setChoices(sets),
+    onChange: (v) => act(bar, () => sendBooster('/api/booster/global', v)),
+  });
   const follow = bots.filter((b) => b.booster.choice.mode === 'global').length;
-  sel.addEventListener('change', () => { sel.blur(); act(bar, () => sendBooster('/api/booster/global', sel.value)); });
   lab.append(sel);
   bar.append(lab, el('span', 'muted', follow ? `${follow} compte${follow > 1 ? 's' : ''} sur ${bots.length} le suiv${follow > 1 ? 'ent' : 'it'}` : 'Aucun compte ne le suit'));
   return bar;
@@ -309,7 +399,8 @@ async function refresh(force) {
     const resolved = await Promise.all(cards);
     // Pas de reconstruction pendant qu'un menu ou un champ est utilisé (sinon la liste se referme)
     const typing = document.activeElement && ($('accounts').contains(document.activeElement) || $('toolbar').contains(document.activeElement)) && (document.activeElement.tagName === 'SELECT' || (document.activeElement.tagName === 'INPUT' && /^(text|password)$/.test(document.activeElement.type)));
-    if (!busy && !typing) {
+    // …ni pendant qu'une liste de booster est ouverte
+    if (!busy && !typing && !document.querySelector('.combo.open')) {
       $('toolbar').replaceChildren(globalBar(d.booster.global, d.bots), ...(manage ? [addBar()] : []));
       $('accounts').replaceChildren(...(resolved.length ? resolved : [el('p', 'empty', manage ? 'Aucun compte pour le moment. Crée-en un ou ajoute un compte existant avec les boutons ci-dessus.' : 'Aucun bot détecté.')]));
     }

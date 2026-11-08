@@ -134,7 +134,24 @@ main, #alerts { max-width: 1180px; margin: 0 auto; padding: 0 1rem; }
 .more[open] { padding-bottom: .9rem; }
 .block { padding: .75rem 0; border-top: 1px solid var(--edge); }
 .block:first-of-type { border-top: 0; padding-top: .25rem; }
-.row select { width: 100%; }
+.row select, .row .combo, .row .combo-btn { width: 100%; }
+/* Liste déroulante avec recherche (choix du booster) */
+.combo { position: relative; display: inline-block; max-width: 100%; }
+.combo-btn { display: inline-flex; align-items: center; justify-content: space-between; gap: .6rem; min-width: 15rem; max-width: 100%; text-align: left; cursor: pointer; }
+.combo-cur { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.combo-caret { flex: none; color: var(--mist); transition: transform .12s ease; }
+.combo.open .combo-btn { border-color: var(--gold); }
+.combo.open .combo-caret { transform: rotate(180deg); }
+.combo-pop { position: fixed; z-index: 50; padding: .5rem; background: var(--sleeve); border: 1px solid var(--edge); border-radius: var(--r-md); box-shadow: 0 14px 36px rgba(0, 0, 0, .5); }
+.combo-pop input { min-height: 40px; }
+.combo-list { list-style: none; margin: .4rem 0 0; padding: 0; max-height: min(18rem, 45vh); overflow-y: auto; overscroll-behavior: contain; }
+.combo-list li { padding: .55rem .65rem; border-radius: var(--r-sm); cursor: pointer; overflow-wrap: anywhere; }
+.combo-list li.active { background: var(--sleeve-2); box-shadow: inset 2px 0 0 var(--gold); }
+.combo-list li.cur { color: var(--gold); font-weight: 600; }
+.combo-list li.cur::after { content: " ✓"; }
+.combo-empty { margin: .6rem .4rem .3rem; }
+@media (max-width: 640px) { .combo-btn { min-width: 0; width: 100%; } .combo { width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .combo-caret { transition: none; } }
 .actions { display: flex; flex-wrap: wrap; gap: .5rem; padding-top: .75rem; border-top: 1px solid var(--edge); }
 .actions button { flex: 1 1 auto; }
 .kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr)); gap: .5rem; margin: .5rem 0; }

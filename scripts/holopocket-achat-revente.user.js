@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Achat-revente intelligent
 // @namespace    kevin.holopocket
-// @version      1.8
+// @version      1.9
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-revente.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-revente.user.js
 // @description  Mode auto : enchérit sur les ventes qui se terminent dans moins de 5 min quand la carte part bien en dessous de sa valeur réelle, garde les cartes qui manquaient à ta collection et remet les autres en vente avec une marge.
@@ -50,6 +50,17 @@
     if (!res.ok) throw new Error(data.message || `${res.status} ${data.error || ''}`.trim());
     return data;
   }
+  // Équipe du site (GET /team) : on ne vend pas, n'achète pas et ne surenchérit pas avec ses membres. Relue toutes les 10 min.
+  let teamCache = { at: 0, set: new Set() };
+  async function teamMembers() {
+    if (Date.now() - teamCache.at < 600000) return teamCache.set;
+    try {
+      const t = await api('GET', '/team');
+      teamCache = { at: Date.now(), set: new Set(((t.team && t.team.members) || []).map((m) => String(m.username).toLowerCase())) };
+    } catch { teamCache.at = Date.now() - 540000; } // illisible : on garde la liste connue, nouvel essai dans 1 min
+    return teamCache.set;
+  }
+  const inTeam = (set, u) => !!u && set.has(String(u).toLowerCase());
   const arr = (d) => (Array.isArray(d) ? d : d.auctions || d.entries || []);
   const keyOf = (cardId, reverse) => `${cardId}|${!!reverse}`;
   const net = (p) => Math.floor(p * (1 - CONFIG.TAX));
@@ -231,6 +242,7 @@
 
   // ───────── 3) Achat : ventes qui se terminent dans moins de 5 min ─────────
   async function buy() {
+    const team = await teamMembers();
     const now = Date.now();
     const deadline = now + CONFIG.MAX_ENDS_IN_MIN * 60000;
     // Ventes qui se terminent bientôt (tri par fin la plus proche)
@@ -256,7 +268,7 @@
     // Premier tri sans requête : valeur affichée sur la vente
     const pre = auctions.filter((a) => {
       const end = Date.parse(a.endsAt);
-      if (a.status !== 'active' || a.isMine || a.isLeading || a.seller === me.username || isExcluded(a.seller) || isExcluded(a.highestBidder)) return false; // jamais d'achat à un joueur exclu, ni de surenchère sur un coéquipier en tête
+      if (a.status !== 'active' || a.isMine || a.isLeading || a.seller === me.username || isExcluded(a.seller) || isExcluded(a.highestBidder) || inTeam(team, a.seller) || inTeam(team, a.highestBidder)) return false; // jamais d'achat à un joueur exclu, ni de surenchère sur un coéquipier en tête
       if (end <= now + 10000 || end > deadline) return false;
       if (leadKeys.has(keyOf(a.card.id, a.reverse))) return false; // une seule enchère gagnante par carte
       const shown = a.reverse ? a.card.reverseMarketValue : a.card.marketValue;

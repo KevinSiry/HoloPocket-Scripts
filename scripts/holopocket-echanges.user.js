@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.14
+// @version      3.15
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord, avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, et des pièces du compte une fois par heure, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
@@ -40,6 +40,8 @@
     FAVORITES_ONLY: false,   // false : toutes les séries (les favoris restent prioritaires) · true : séries en favori uniquement
     PRIORITY_MAX_CARDS: 10, // échange prioritaire : cartes données par envoi (10 = limite du site)
     PRIORITY_MAX_CHECK: 40, // …et fiches de cartes vérifiées au plus par passage
+    PRIORITY_MATCH: true,   // …la cible rend des doublons de valeur équivalente (échange réciproque au lieu d'un don)
+    PRIORITY_MATCH_TOL: 0.10, // …écart de valeur toléré entre les deux côtés (10 %, au moins TOL_ABS pièces)
     PRIORITY_COINS: false,  // …joint aussi les pièces du compte à l'échange : coupé, un transfert à sens unique de pièces est un signal fort pour le site
     PRIORITY_COINS_EVERY_MIN: 60, // …au plus une fois par heure
     PRIORITY_COINS_KEEP: 0, // …pièces laissées sur ce compte
@@ -564,16 +566,38 @@
       const give = list(await api('GET', `/users/${encodeURIComponent(myName)}/cards?notOwnedBy=${encodeURIComponent(target)}`)) // toutes tes cartes, pas seulement les doublons
         .filter((c) => !inBinder(c) && !flipRes.has(key(c)) && (c.userCardIds || []).length)
         .sort((a, b) => val(b) - val(a));
-      const ids = [];
+      let ids = [];
+      const offered = []; // { id, v } : exemplaire proposé et sa valeur
       let checked = 0;
       for (const g of give) {
-        if (ids.length >= CONFIG.PRIORITY_MAX_CARDS || checked >= CONFIG.PRIORITY_MAX_CHECK) break;
+        if (offered.length >= CONFIG.PRIORITY_MAX_CARDS || checked >= CONFIG.PRIORITY_MAX_CHECK) break;
         if (isBlocked(key(g))) continue;
         checked++;
         const info = await freeInfo(g, log, 0); // fiche de la carte : en vente ou déjà promise → ignorée (le dernier exemplaire peut partir)
-        if (info.spare >= 1) ids.push(info.ids[0]);
+        if (info.spare >= 1) offered.push({ id: info.ids[0], v: val(g) });
         await sleep(CONFIG.DELAY / 2);
       }
+      // Échange réciproque : la cible rend ses doublons (n'importe lesquels) pour une valeur équivalente
+      let requested = [];
+      if (CONFIG.PRIORITY_MATCH && offered.length) {
+        const tol = (v) => Math.max(v * CONFIG.PRIORITY_MATCH_TOL, CONFIG.TOL_ABS);
+        const theirs = list(await api('GET', `/users/${encodeURIComponent(target)}/cards`))
+          .filter((c) => !inBinder(c) && (c.copies ?? 1) >= 2 && (c.userCardIds || []).length && val(c) > 0)
+          .sort((a, b) => val(b) - val(a));
+        const total = offered.reduce((t, x) => t + x.v, 0);
+        let got = 0;
+        for (const c of theirs) { // du plus cher au moins cher : le plus gros qui ne dépasse pas encore l'écart toléré
+          if (requested.length >= CONFIG.PRIORITY_MAX_CARDS) break;
+          if (got + val(c) <= total + tol(total)) { requested.push(c.userCardIds[0]); got += val(c); if (got >= total - tol(total)) break; }
+        }
+        // Moins de valeur reçue que proposée : on retire des cartes proposées (les moins chères d'abord) jusqu'à l'équilibre
+        offered.sort((a, b) => b.v - a.v);
+        let sum = 0; const kept = [];
+        for (const x of offered) if (sum + x.v <= got + tol(got)) { kept.push(x); sum += x.v; }
+        offered.length = 0; offered.push(...kept);
+        if (!requested.length || !offered.length) { later(CONFIG.PRIORITY_IDLE_MIN); return false; }
+      }
+      ids = offered.map((x) => x.id);
       // Pièces du compte, au plus une fois par heure, jointes à un échange qui contient au moins une carte
       let coins = 0;
       if (CONFIG.PRIORITY_COINS && Date.now() >= lsNum(PRIORITY_COINS_KEY)) {
@@ -584,7 +608,7 @@
       const send = (c) => api('POST', '/trades', {
         toUsername: target,
         offeredUserCardIds: ids,
-        requestedUserCardIds: [],
+        requestedUserCardIds: requested,
         offeredCoins: c,
         requestedCoins: 0,
       });
@@ -600,7 +624,7 @@
       writeLocal([...readLocal(), { to: target, at: Date.now() }]);
       if (openTrades != null) openTrades++;
       lastPriorityErr = ''; priorityErrs = 0; failStreak = 0; lsSet(PRIORITY_NEXT_KEY, 0);
-      UI.toast(`<b>Échange prioritaire</b> : ${[`${ids.length} carte(s)`, coins ? `${coins} pièces` : ''].filter(Boolean).join(' + ')} proposée(s) à ${esc(target)}`, { kind: 'success', ms: 12000 });
+      UI.toast(`<b>Échange prioritaire</b> : ${[`${ids.length} carte(s)${requested.length ? ` contre ${requested.length}` : ''}`, coins ? `${coins} pièces` : ''].filter(Boolean).join(' + ')} proposée(s) à ${esc(target)}`, { kind: 'success', ms: 12000 });
       return true;
     } catch (e) {
       priorityErrs++;

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Vendre mes doublons
 // @namespace    kevin.holopocket
-// @version      4.5
+// @version      4.6
 // @description  Marché : met en vente les doublons (prix conseillé, les plus chers d'abord), à la demande ou en mode auto qui remplit les slots dès qu'une place se libère.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -149,7 +149,7 @@
         if (/limite|max|10/i.test(e.message)) break; // plus de place
         // Marché refusé : 1 h de pause ; deux refus d'affilée pour une autre raison : 15 min
         streak++;
-        if (RESTRICTED.test(e.message)) { pauseSales(60); break; }
+        if (RESTRICTED.test(e.message)) { pauseSales(60); try { localStorage.setItem('hp-market-blocked-until', String(Date.now() + 60 * 60000)); } catch {} break; }
         if (streak >= 2) { pauseSales(15); break; }
       }
     }

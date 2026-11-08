@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Achat des cartes manquantes bradées
 // @namespace    kevin.holopocket
-// @version      1.4
+// @version      1.5
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-manquantes.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-manquantes.user.js
 // @description  Mode auto : enchérit (mise minimale) sur les ventes qui se terminent dans moins de 5 min quand la carte te manque et qu'elle part à 70 % du prix moyen ou moins. N'achète rien pour revendre.
@@ -54,6 +54,12 @@
     return teamCache.set;
   }
   const inTeam = (set, u) => !!u && set.has(String(u).toLowerCase());
+  // Marché refusé (compte récent : restrictions des premières 24 h, etc.) : pause partagée entre les scripts de vente et d'achat
+  const BLOCK_KEY = 'hp-market-blocked-until';
+  const RESTRICTED = /nouveau|r[ée]cent|restreint|interdit|bloqu|pas encore|avant de pouvoir|\b24\s*h|^403\b/i;
+  const blockedUntil = () => { try { return +localStorage.getItem(BLOCK_KEY) || 0; } catch { return 0; } };
+  const blockMarket = (min) => { try { localStorage.setItem(BLOCK_KEY, String(Math.max(blockedUntil(), Date.now() + min * 60000))); } catch {} };
+  let refusals = 0; // refus d'affilée pour une autre raison
   const arr = (d) => (Array.isArray(d) ? d : d.auctions || d.entries || []);
   const keyOf = (cardId, reverse) => `${cardId}|${!!reverse}`;
 
@@ -203,7 +209,13 @@
             localStorage.setItem(ESCROW_KEY, before - me.balance >= p.a.minBid - 1 ? '1' : '0');
           }
         } catch {}
-      } catch (e) { note(`Enchère refusée sur ${name} : ${e.message}`); }
+        refusals = 0;
+      } catch (e) {
+        note(`Enchère refusée sur ${name} : ${e.message}`);
+        // Marché refusé : 1 h de pause ; trois refus d'affilée pour une autre raison : 15 min
+        if (RESTRICTED.test(e.message)) { blockMarket(60); note('Marché restreint : pause de 1 h'); break; }
+        if (++refusals >= 3) { blockMarket(15); refusals = 0; note('Enchères refusées à la suite : pause de 15 min'); break; }
+      }
       await sleep(CONFIG.DELAY);
     }
   }
@@ -445,7 +457,7 @@
       S = load();
       me = (await api('GET', '/me')).me;
       await settle(); save();
-      await buy(); save();
+      if (Date.now() >= blockedUntil()) { await buy(); save(); }
     } catch (e) {
       note(`Erreur : ${e.message}`); save();
     } finally {
@@ -474,7 +486,7 @@
   }
 
   function paint() {
-    const sub = !autoOn ? 'Désactivé' : `${status.bids} en tête · ${status.engaged} engagées · ${S.stats.won} gagnée${S.stats.won > 1 ? 's' : ''}`;
+    const sub = !autoOn ? 'Désactivé' : Date.now() < blockedUntil() ? `Marché bloqué, reprise dans ${Math.ceil((blockedUntil() - Date.now()) / 60000)} min` : `${status.bids} en tête · ${status.engaged} engagées · ${S.stats.won} gagnée${S.stats.won > 1 ? 's' : ''}`;
     UI.button('hp-miss-auto', {
       label: 'Cartes manquantes', sub, icon: 'coins', kind: 'toggle', on: autoOn, order: 95, busy: busy && autoOn,
       title: 'Enchérit sur les cartes qui te manquent quand elles partent à 70 % du prix moyen ou moins',

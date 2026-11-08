@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Achat-revente intelligent
 // @namespace    kevin.holopocket
-// @version      1.9
+// @version      1.10
 // @description  Mode auto : enchérit sur les ventes qui se terminent dans moins de 5 min quand la carte part bien en dessous de sa valeur réelle, garde les cartes qui manquaient à ta collection et remet les autres en vente avec une marge.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -59,6 +59,12 @@
     return teamCache.set;
   }
   const inTeam = (set, u) => !!u && set.has(String(u).toLowerCase());
+  // Marché refusé (compte récent : restrictions des premières 24 h, etc.) : pause partagée entre les scripts de vente et d'achat
+  const BLOCK_KEY = 'hp-market-blocked-until';
+  const RESTRICTED = /nouveau|r[ée]cent|restreint|interdit|bloqu|pas encore|avant de pouvoir|\b24\s*h|^403\b/i;
+  const blockedUntil = () => { try { return +localStorage.getItem(BLOCK_KEY) || 0; } catch { return 0; } };
+  const blockMarket = (min) => { try { localStorage.setItem(BLOCK_KEY, String(Math.max(blockedUntil(), Date.now() + min * 60000))); } catch {} };
+  let refusals = 0; // refus d'affilée pour une autre raison
   const arr = (d) => (Array.isArray(d) ? d : d.auctions || d.entries || []);
   const keyOf = (cardId, reverse) => `${cardId}|${!!reverse}`;
   const net = (p) => Math.floor(p * (1 - CONFIG.TAX));
@@ -233,7 +239,10 @@
         h.auctionId = id; h.price = price; free--;
         save();
         note(`Remise en vente : ${h.name} à ${price} (achat ${h.cost})`);
-      } catch (e) { note(`Vente impossible pour ${h.name} : ${e.message}`); }
+      } catch (e) {
+        note(`Vente impossible pour ${h.name} : ${e.message}`);
+        if (RESTRICTED.test(e.message)) { blockMarket(60); note('Marché restreint : pause de 1 h'); break; }
+      }
       await sleep(CONFIG.DELAY);
     }
   }
@@ -307,7 +316,12 @@
             localStorage.setItem(ESCROW_KEY, before - me.balance >= p.a.minBid - 1 ? '1' : '0');
           }
         } catch {}
-      } catch (e) { note(`Enchère refusée sur ${name} : ${e.message}`); }
+        refusals = 0;
+      } catch (e) {
+        note(`Enchère refusée sur ${name} : ${e.message}`);
+        if (RESTRICTED.test(e.message)) { blockMarket(60); note('Marché restreint : pause de 1 h'); break; }
+        if (++refusals >= 3) { blockMarket(15); refusals = 0; note('Enchères refusées à la suite : pause de 15 min'); break; }
+      }
       await sleep(CONFIG.DELAY);
     }
   }
@@ -338,8 +352,7 @@
       S = load(); // un autre onglet a pu modifier l'état
       me = (await api('GET', '/me')).me;
       await settle(); save();
-      await relist(); save();
-      await buy(); save();
+      if (Date.now() >= blockedUntil()) { await relist(); save(); await buy(); save(); }
     } catch (e) {
       beatErr = e.message; note(`Erreur : ${e.message}`); save();
     } finally {

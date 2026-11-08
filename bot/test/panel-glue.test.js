@@ -74,7 +74,7 @@ test('état : compte, échanges (seulement les miens en attente), ventes, script
   assert.strictEqual(st.bot.sessionOk, true);
   assert.deepStrictEqual(st.booster, { mode: 'auto', setId: null, favorites: [{ id: 'me05', name: 'Nuit Noire' }] });
   assert.deepStrictEqual(st.scripts.map((x) => [x.name, x.on]),
-    [['auto-booster', true], ['echanges', true], ['vendre-doublons', false], ['recyclage', false], ['achat-revente', false]]);
+    [['auto-booster', true], ['echanges', true], ['vendre-doublons', false], ['recyclage', false], ['achat-revente', false], ['achat-manquantes', false]]);
 });
 
 test('état : « depuis quand » pour l’énergie pleine et les échanges à 20/20', async () => {

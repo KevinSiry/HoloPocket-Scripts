@@ -14,6 +14,7 @@ const TOGGLE_OF = {
   'holopocket-recyclage.user.js': 'hp-recycle-auto-on',
   'holopocket-echanges.user.js': 'hp-trade-auto-on',
   'holopocket-achat-revente.user.js': 'hp-flip-auto-on',
+  'holopocket-achat-manquantes.user.js': 'hp-miss-auto-on',
 };
 const list = (s) => (s || '').split(',').map((x) => x.trim()).filter(Boolean);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

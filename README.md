@@ -11,6 +11,7 @@ Chaque script contient `@updateURL` : Tampermonkey récupère tout seul les nouv
 | Script | Version | Lien |
 |---|---|---|
 | Achat-revente intelligent | 1.4 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-revente.user.js) |
+| Achat des cartes manquantes bradées (auto, 50 % du prix moyen) | 1.0 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-manquantes.user.js) |
 | Enchérir sur mes cartes manquantes | 2.1 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-acheter-manquantes.user.js) |
 | Ouverture auto quand l’énergie est pleine | 2.1 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-auto-booster.user.js) |
 | Assistant Cartodle | 2.0 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-cartodle.user.js) |

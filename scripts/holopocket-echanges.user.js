@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.11
+// @version      3.12
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
-// @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord, avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
+// @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord, avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, et des pièces du compte une fois par heure, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
 // @match        https://holopocket.fr/*
 // @grant        none
 // @run-at       document-idle
@@ -40,6 +40,10 @@
     FAVORITES_ONLY: false,   // false : toutes les séries (les favoris restent prioritaires) · true : séries en favori uniquement
     PRIORITY_MAX_CARDS: 10, // échange prioritaire : cartes données par envoi (10 = limite du site)
     PRIORITY_MAX_CHECK: 40, // …et fiches de cartes vérifiées au plus par passage
+    PRIORITY_COINS: true,   // …joint aussi les pièces du compte à l'échange (pour les ramener sur le compte principal)
+    PRIORITY_COINS_EVERY_MIN: 60, // …au plus une fois par heure
+    PRIORITY_COINS_KEEP: 0, // …pièces laissées sur ce compte
+    PRIORITY_COINS_MIN: 20, // …rien envoyé en dessous de ce solde (inutile de gaspiller un échange)
     PRIORITY_IDLE_MIN: 5,   // …rien à donner (ou cible fermée) : on ne rescanne pas avant 5 min, pour ménager l'API
     BLOCK_PAUSE_MIN: 60,    // le site refuse les échanges (compte récent…) : tout est suspendu 1 h
     FAIL_PAUSE_MIN: 30,     // 3 envois refusés d'affilée, quelle qu'en soit la raison : pause de 30 min
@@ -55,7 +59,7 @@
   // Pauses mémorisées dans localStorage : elles survivent au rechargement de la page
   const lsNum = (k) => { try { return +localStorage.getItem(k) || 0; } catch { return 0; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, String(v)); } catch {} };
-  const BLOCKED_KEY = 'hp-trade-blocked-until', PRIORITY_NEXT_KEY = 'hp-priority-next';
+  const BLOCKED_KEY = 'hp-trade-blocked-until', PRIORITY_NEXT_KEY = 'hp-priority-next', PRIORITY_COINS_KEY = 'hp-priority-coins-next';
   const isBlocked_ = () => Date.now() < lsNum(BLOCKED_KEY);
   // Refus du site qui ressemblent à une restriction du compte (compte récent, échanges interdits…)
   const BLOCK_RE = /nouveau|r[ée]cent|restreint|interdit|bloqu|pas encore|avant de pouvoir|\b24\s*h|^403\b/i;
@@ -570,19 +574,33 @@
         if (info.spare >= 1) ids.push(info.ids[0]);
         await sleep(CONFIG.DELAY / 2);
       }
-      if (!ids.length) { later(CONFIG.PRIORITY_IDLE_MIN); return false; }
-      await api('POST', '/trades', {
+      // Pièces du compte, au plus une fois par heure, avec les cartes ou seules
+      let coins = 0;
+      if (CONFIG.PRIORITY_COINS && Date.now() >= lsNum(PRIORITY_COINS_KEY)) {
+        try { coins = Math.max(0, Math.floor(((await api('GET', '/me')).me || {}).balance || 0) - CONFIG.PRIORITY_COINS_KEEP); } catch {}
+        if (coins < CONFIG.PRIORITY_COINS_MIN) coins = 0;
+      }
+      if (!ids.length && !coins) { later(CONFIG.PRIORITY_IDLE_MIN); return false; }
+      const send = (c) => api('POST', '/trades', {
         toUsername: target,
         offeredUserCardIds: ids,
         requestedUserCardIds: [],
-        offeredCoins: 0,
+        offeredCoins: c,
         requestedCoins: 0,
       });
+      try { await send(coins); }
+      catch (e) {
+        // Le site refuse les pièces de ce côté : on renvoie les cartes seules et on réessaie les pièces dans 6 h
+        if (!coins || !ids.length || !/pi[eè]ce|coin|solde|balance|insuffisan/i.test(e.message)) throw e;
+        coins = 0; lsSet(PRIORITY_COINS_KEY, Date.now() + 6 * 3600000);
+        await send(0);
+      }
+      if (coins) lsSet(PRIORITY_COINS_KEY, Date.now() + CONFIG.PRIORITY_COINS_EVERY_MIN * 60000);
       savePromised(ids); // les scripts de vente n'y touchent plus
       writeLocal([...readLocal(), { to: target, at: Date.now() }]);
       if (openTrades != null) openTrades++;
       lastPriorityErr = ''; priorityErrs = 0; failStreak = 0; lsSet(PRIORITY_NEXT_KEY, 0);
-      UI.toast(`<b>Échange prioritaire</b> : ${ids.length} carte(s) proposée(s) à ${esc(target)}`, { kind: 'success', ms: 12000 });
+      UI.toast(`<b>Échange prioritaire</b> : ${[ids.length ? `${ids.length} carte(s)` : '', coins ? `${coins} pièces` : ''].filter(Boolean).join(' + ')} proposée(s) à ${esc(target)}`, { kind: 'success', ms: 12000 });
       return true;
     } catch (e) {
       priorityErrs++;

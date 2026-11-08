@@ -5,6 +5,7 @@ const SCRIPT_LABELS = {
   'vendre-doublons': 'Vente des doublons',
   recyclage: 'Recyclage',
   'achat-revente': 'Achat-revente',
+  'achat-manquantes': 'Achat des cartes manquantes',
 };
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };

@@ -2,7 +2,7 @@
 // Priorité : panel-config.json > .env > valeurs par défaut.
 const fs = require('fs');
 
-const KNOWN_SCRIPTS = ['auto-booster', 'echanges', 'vendre-doublons', 'recyclage', 'achat-revente'];
+const KNOWN_SCRIPTS = ['auto-booster', 'echanges', 'vendre-doublons', 'recyclage', 'achat-revente', 'achat-manquantes'];
 const toFile = (name) => `holopocket-${name}.user.js`;
 const toName = (file) => file.replace(/^holopocket-|\.user\.js$/g, '');
 

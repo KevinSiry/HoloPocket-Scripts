@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Achat des cartes manquantes bradées
 // @namespace    kevin.holopocket
-// @version      1.2
+// @version      1.3
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-manquantes.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-manquantes.user.js
 // @description  Mode auto : enchérit (mise minimale) sur les ventes qui se terminent dans moins de 5 min quand la carte te manque et qu'elle part à 70 % du prix moyen ou moins. N'achète rien pour revendre.
@@ -149,7 +149,7 @@
     // Tri sans requête : fin proche, pas à moi, pas à un joueur exclu, mise minimale déjà sous 50 % de la valeur affichée
     const pre = auctions.filter((a) => {
       const end = Date.parse(a.endsAt);
-      if (a.status !== 'active' || a.isMine || a.isLeading || a.seller === me.username || isExcluded(a.seller)) return false;
+      if (a.status !== 'active' || a.isMine || a.isLeading || a.seller === me.username || isExcluded(a.seller) || isExcluded(a.highestBidder)) return false; // un coéquipier est déjà en tête : on ne surenchérit pas
       if (end <= now + 10000 || end > deadline) return false;
       if (a.reverse && !CONFIG.INCLUDE_REVERSE) return false;
       if (leadKeys.has(keyOf(a.card.id, a.reverse))) return false;

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Achat-revente intelligent
 // @namespace    kevin.holopocket
-// @version      1.7
+// @version      1.8
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-revente.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-revente.user.js
 // @description  Mode auto : enchérit sur les ventes qui se terminent dans moins de 5 min quand la carte part bien en dessous de sa valeur réelle, garde les cartes qui manquaient à ta collection et remet les autres en vente avec une marge.
@@ -256,7 +256,7 @@
     // Premier tri sans requête : valeur affichée sur la vente
     const pre = auctions.filter((a) => {
       const end = Date.parse(a.endsAt);
-      if (a.status !== 'active' || a.isMine || a.isLeading || a.seller === me.username || isExcluded(a.seller)) return false; // jamais d'achat à un joueur exclu
+      if (a.status !== 'active' || a.isMine || a.isLeading || a.seller === me.username || isExcluded(a.seller) || isExcluded(a.highestBidder)) return false; // jamais d'achat à un joueur exclu, ni de surenchère sur un coéquipier en tête
       if (end <= now + 10000 || end > deadline) return false;
       if (leadKeys.has(keyOf(a.card.id, a.reverse))) return false; // une seule enchère gagnante par carte
       const shown = a.reverse ? a.card.reverseMarketValue : a.card.marketValue;

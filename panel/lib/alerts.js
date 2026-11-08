@@ -1,6 +1,6 @@
 // Alertes calculées à partir du dernier état connu de chaque bot.
 const MIN = 60000;
-const OFFLINE_AFTER = 30000;
+const OFFLINE_AFTER = 60000;
 const TRADES_FULL_AFTER = 120 * MIN;
 const ENERGY_FULL_AFTER = 10 * MIN;
 const ERROR_WINDOW = 15 * MIN;

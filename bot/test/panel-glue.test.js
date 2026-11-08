@@ -87,16 +87,16 @@ test('état : « depuis quand » pour l’énergie pleine et les échanges à 20
   const b = await s.glue.status();
   assert.strictEqual(b.account.energy.fullSince, a.account.energy.fullSince, 'le début ne bouge pas tant que ça dure');
   s.world.site.me.me.packs = { stock: 2, max: 10 };
-  s.tick(10_000);
+  s.tick(16_000);
   assert.strictEqual((await s.glue.status()).account.energy.fullSince, null);
 });
 
-test('état : mis en cache 5 s', async () => {
+test('état : mis en cache 15 s', async () => {
   const s = setup();
   const a = await s.glue.status();
   s.world.site.me.me.balance = 999;
   assert.strictEqual((await s.glue.status()).account.balance, a.account.balance);
-  s.tick(6000);
+  s.tick(16000);
   assert.strictEqual((await s.glue.status()).account.balance, 999);
 });
 

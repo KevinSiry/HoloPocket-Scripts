@@ -16,6 +16,24 @@ const TOGGLE_OF = {
   'holopocket-achat-revente.user.js': 'hp-flip-auto-on',
   'holopocket-achat-manquantes.user.js': 'hp-miss-auto-on',
 };
+// Chromium au plus léger : personne ne regarde ces pages, seules les requêtes et les scripts comptent
+const LIGHT_ARGS = [
+  '--disable-dev-shm-usage', '--disable-gpu', '--disable-software-rasterizer', '--mute-audio',
+  '--blink-settings=imagesEnabled=false', '--js-flags=--max-old-space-size=256',
+  '--disable-extensions', '--disable-sync', '--disable-translate', '--disable-component-update', '--disable-default-apps',
+  '--disable-background-networking', '--disable-breakpad', '--disable-domain-reliability', '--disable-client-side-phishing-detection',
+  '--metrics-recording-only', '--no-first-run', '--no-default-browser-check', '--password-store=basic',
+  '--disable-features=Translate,MediaRouter,OptimizationHints,BackForwardCache,InterestFeedContentSuggestions,CalculateNativeWinOcclusion,AudioServiceOutOfProcess',
+  '--renderer-process-limit=1',
+];
+// Exécuté dans chaque page avant le site : plus d'animations, et les minuteries d'affichage (1 à 2 s) passent à 5 à 10 s
+function lightPage() {
+  const st = document.createElement('style');
+  st.textContent = '*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}';
+  document.addEventListener('DOMContentLoaded', () => document.head.appendChild(st), { once: true });
+  const si = window.setInterval.bind(window);
+  window.setInterval = (fn, ms, ...a) => si(fn, ms >= 1000 && ms <= 2000 ? ms * 5 : ms, ...a);
+}
 const list = (s) => (s || '').split(',').map((x) => x.trim()).filter(Boolean);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const BAD = /impossible|refusée|plantée|Arrêt|Erreur page|expirée|absente/i;
@@ -29,6 +47,7 @@ function buildConfig({ env, file = {}, username, password, cookie, allAccounts }
     password: password ?? (env.HP_PASSWORD || file.password || ''),
     cookie: cookie ?? (env.HP_COOKIE || file.cookie || ''),
     scripts: list(env.HP_SCRIPTS).length ? list(env.HP_SCRIPTS).map((n) => (n.endsWith('.user.js') ? n : `holopocket-${n}.user.js`)) : file.scripts || DEFAULT_SCRIPTS,
+    light: !/^(0|false|non|no)$/i.test(String(env.HP_LIGHT || '1')), // HP_LIGHT=0 : navigateur complet (images, animations)
     checkUpdatesMin: +(env.HP_CHECK_UPDATES_MIN || file.checkUpdatesMin || 15),
     reloadEveryH: +(env.HP_RELOAD_EVERY_H || file.reloadEveryH || 6),
     exclude: list(env.HP_EXCLUDE).length ? list(env.HP_EXCLUDE) : file.exclude || [],
@@ -108,9 +127,9 @@ async function startAccount(opts) {
   };
 
   const ctx = await chromium.launchPersistentContext(profileDir, {
-    headless: true, viewport: { width: 1400, height: 900 }, locale: 'fr-FR', timezoneId: 'Europe/Paris',
+    headless: true, viewport: { width: 1100, height: 700 }, locale: 'fr-FR', timezoneId: 'Europe/Paris',
     bypassCSP: true, // le site interdit les scripts ajoutés à la page (CSP) : Tampermonkey contourne cette règle, on fait pareil
-    args: ['--disable-dev-shm-usage'],
+    args: LIGHT_ARGS,
   });
   const stop = async () => {
     if (stopped) return;
@@ -122,6 +141,11 @@ async function startAccount(opts) {
     if (cfg.cookie) await ctx.addCookies(parseCookie(cfg.cookie));
     const setLS = (t) => { try { for (const [k, v] of Object.entries(t)) localStorage.setItem(k, v); } catch {} };
     await ctx.addInitScript(setLS, cfg.toggles);
+    if (cfg.light) {
+      await ctx.addInitScript(lightPage);
+      // Ni images, ni polices, ni médias : rien de tout cela ne sert aux scripts
+      await ctx.route('**/*', (route) => (['image', 'media', 'font'].includes(route.request().resourceType()) ? route.abort() : route.continue()));
+    }
 
     let scripts = await fetchScripts();
     log('Scripts :', sig(scripts));
@@ -191,7 +215,7 @@ async function startAccount(opts) {
           .filter((x) => x.text && !window.__seen.has(x.text) && window.__seen.add(x.text));
       }).catch(() => []);
       for (const x of t) logL(x.error ? 'error' : 'info', '›', x.text.replace(/\s+/g, ' ').slice(0, 300));
-    }, 5000);
+    }, 10000);
 
     // Session toujours valide ? Sinon reconnexion puis rechargement des scripts
     every(async () => {

@@ -61,6 +61,7 @@ Les réglages sont conservés dans le volume de chaque compte (`panel-config.jso
 | `HP_ACCOUNTS` | pseudos de tous tes comptes : chacun ignore les autres automatiquement |
 | `HP_EXCLUDE` | pseudos à ne jamais solliciter en plus : aucun échange, aucune enchère sur leurs ventes. Mets-y tes autres comptes pour qu'ils restent indépendants |
 | `HP_PRIORITY_TARGET` | pseudo d'un joueur à servir en priorité : à chaque passage (toutes les minutes), avant la recherche normale, le script `echanges` lui propose en don toutes tes cartes qu'il n'a pas, même en un seul exemplaire (jamais une carte en vente, hors classeur et cartes réservées à la revente ; 10 cartes max par échange, les plus chères d'abord, rien demandé en retour). Pour tous les autres échanges, le dernier exemplaire d'une carte n'est jamais donné. Un seul échange ouvert à la fois avec lui, sans pause après acceptation ou refus. Si tu l'as mis dans `HP_EXCLUDE`, la priorité l'emporte |
+| `HP_LIGHT` | `1` par défaut : Chromium allégé (sans images, polices ni animations, drapeaux GPU coupés, minuteries d'affichage ralenties). `0` pour le navigateur complet |
 | `HP_SCRIPTS` | scripts à faire tourner (par défaut `auto-booster,echanges`) ; disponibles : `auto-booster, echanges, vendre-doublons, recyclage, achat-revente, achat-manquantes` |
 | `HP_DEFAULT_BOOSTER` | série ouverte par l'auto-booster si le compte n'a aucun favori (nom ou identifiant, ex. `Nuit Noire` ou `me05`) |
 | `HP_CHECK_UPDATES_MIN` | délai de vérification des nouvelles versions (15 par défaut) |

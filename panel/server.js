@@ -248,7 +248,7 @@ function main() {
     trustProxy: env.PANEL_TRUST_PROXY === '1', secureCookie: env.PANEL_INSECURE_COOKIE !== '1',
   });
   // Les journaux et alertes se construisent même quand personne ne regarde le panel
-  setInterval(() => bots.refreshAll().then((l) => reconciler.run(l)).catch(() => {}), 10000);
+  setInterval(() => bots.refreshAll().then((l) => reconciler.run(l)).catch(() => {}), 20000);
   const port = +(env.PANEL_PORT || 8080);
   app.listen(port, '0.0.0.0', () => console.log(`Panel à l’écoute sur le port ${port} · ${fleetMode ? 'mode flotte' : `${bots.names().length} compte(s)`}`));
 }

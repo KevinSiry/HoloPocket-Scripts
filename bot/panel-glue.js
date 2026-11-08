@@ -27,8 +27,10 @@ function readSiteState() {
     try { const r = await fetch('/api' + p, { credentials: 'same-origin' }); return r.ok ? await r.json() : null; } catch { return null; }
   };
   const ls = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } };
-  return Promise.all([j('/me'), j('/trades/sent'), j('/market/counts'), j('/sets')])
-    .then(([me, sent, counts, sets]) => ({ me, sent, counts, sets, flip: ls('hp-flip-state'), beat: ls('hp-flip-beat') }));
+  // La liste des séries bouge très rarement : relue au plus toutes les 10 min
+  const cached = window.__hpSets && Date.now() - window.__hpSets.at < 600000;
+  return Promise.all([j('/me'), j('/trades/sent'), j('/market/counts'), cached ? window.__hpSets.v : j('/sets')])
+    .then(([me, sent, counts, sets]) => { if (!cached && sets) window.__hpSets = { at: Date.now(), v: sets }; return ({ me, sent, counts, sets, flip: ls('hp-flip-state'), beat: ls('hp-flip-beat') }); });
 }
 function readSets() {
   return fetch('/api/sets', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : []));
@@ -59,7 +61,7 @@ function createGlue(deps) {
   let setsCache = { at: 0, v: null };
 
   async function status() {
-    if (statusCache.v && now() - statusCache.at < 5000) return statusCache.v;
+    if (statusCache.v && now() - statusCache.at < 15000) return statusCache.v;
     const d = await page.evaluate(readSiteState).catch(() => null);
     const me = d && d.me && d.me.me;
     const t = now();

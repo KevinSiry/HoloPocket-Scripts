@@ -18,9 +18,9 @@ const bot = (over = {}, st = {}) => ({
 const codes = (b) => computeAlerts([b], NOW).map((a) => a.code);
 
 test('bot en bonne santé : aucune alerte', () => assert.deepStrictEqual(codes(bot()), []));
-test('hors ligne : seulement après 30 s', () => {
-  assert.deepStrictEqual(codes(bot({ online: false, lastSeen: NOW - 20000 })), []);
-  assert.deepStrictEqual(codes(bot({ online: false, lastSeen: NOW - 40000 })), ['offline']);
+test('hors ligne : seulement après 1 min', () => {
+  assert.deepStrictEqual(codes(bot({ online: false, lastSeen: NOW - 40000 })), []);
+  assert.deepStrictEqual(codes(bot({ online: false, lastSeen: NOW - 70000 })), ['offline']);
   assert.deepStrictEqual(codes(bot({ online: false, lastSeen: null })), ['offline']);
 });
 test('session perdue et quarantaine', () => {

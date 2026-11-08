@@ -62,12 +62,18 @@ let manage = false; // le panel gère les comptes (mode flotte)
 let busy = 0; // pause du rafraîchissement pendant une action
 let openSets = {};
 
-// Pastille compacte : intitulé, valeur, jauge fine facultative
-function stat(label, value, meterVal, meterMax) {
-  const d = el('div', 'stat');
-  d.append(el('span', 'k', label), el('span', 'v', value));
-  if (meterMax) { const m = el('progress'); m.max = meterMax; m.value = meterVal || 0; d.append(m); }
-  return d;
+// Ligne de jauge : intitulé, barre, valeur. La barre change de ton quand elle est pleine.
+function meter(label, val, max) {
+  const row = el('div', 'meter');
+  const pct = max ? Math.max(0, Math.min(1, (val || 0) / max)) : 0;
+  const bar = el('span', 'track');
+  bar.setAttribute('role', 'meter'); bar.setAttribute('aria-label', label);
+  bar.setAttribute('aria-valuemin', '0'); bar.setAttribute('aria-valuemax', String(max || 0)); bar.setAttribute('aria-valuenow', String(val || 0));
+  const fill = el('i'); fill.style.setProperty('--p', String(pct));
+  bar.append(fill);
+  if (pct >= 1) row.classList.add('full');
+  row.append(el('span', 'k', label), bar, el('span', 'v', `${num(val)}/${num(max)}`));
+  return row;
 }
 const openCards = new Set(); // réglages dépliés (gardés d'un rafraîchissement à l'autre)
 function fold(name, title, ...children) {
@@ -134,19 +140,22 @@ function globalBar(globalChoice, bots) {
   const follow = bots.filter((b) => b.booster.choice.mode === 'global').length;
   sel.addEventListener('change', () => { sel.blur(); act(bar, () => sendBooster('/api/booster/global', sel.value)); });
   lab.append(sel);
-  bar.append(lab, el('span', 'muted', `${follow} compte${follow > 1 ? 's' : ''} le suivent`));
+  bar.append(lab, el('span', 'muted', follow ? `${follow} compte${follow > 1 ? 's' : ''} sur ${bots.length} le suiv${follow > 1 ? 'ent' : 'it'}` : 'Aucun compte ne le suit'));
   return bar;
 }
 
-function scriptsBlock(bot, card) {
-  const box = el('div', 'block');
-  box.append(el('h3', null, 'Scripts'));
+const SHORT = { 'auto-booster': 'Boosters', echanges: 'Échanges', 'vendre-doublons': 'Vente', recyclage: 'Recyclage', 'achat-revente': 'Achat-revente', 'achat-manquantes': 'Manquantes' };
+function scriptChips(bot, card) {
+  const box = el('div', 'chips');
+  box.setAttribute('role', 'group'); box.setAttribute('aria-label', `Scripts de ${bot.name}`);
   for (const sc of bot.status.scripts) {
-    const lab = el('label', 'switch');
-    const cb = el('input'); cb.type = 'checkbox'; cb.checked = sc.on;
-    cb.addEventListener('change', () => { cb.blur(); act(card, () => api('PUT', `/api/bots/${encodeURIComponent(bot.name)}/config`, { scripts: { [sc.name]: cb.checked } }).then(() => toast(cb.checked ? 'Script activé' : 'Script coupé'))); });
-    lab.append(cb, el('span', null, SCRIPT_LABELS[sc.name] || sc.name), el('small', 'muted', sc.version ? `v${sc.version}` : ''));
-    box.append(lab);
+    const b = el('button', sc.on ? 'tog on' : 'tog', SHORT[sc.name] || sc.name);
+    b.type = 'button';
+    b.setAttribute('aria-pressed', String(sc.on));
+    b.title = `${SCRIPT_LABELS[sc.name] || sc.name}${sc.version ? `, version ${sc.version}` : ''}. ${sc.on ? 'Cliquer pour couper' : 'Cliquer pour activer'}.`;
+    b.addEventListener('click', () => act(card, () => api('PUT', `/api/bots/${encodeURIComponent(bot.name)}/config`, { scripts: { [sc.name]: !sc.on } })
+      .then(() => toast(`${SCRIPT_LABELS[sc.name] || sc.name} ${sc.on ? 'coupé' : 'activé'} sur ${bot.name}`))));
+    box.append(b);
   }
   return box;
 }
@@ -156,8 +165,10 @@ const hhmm = (iso) => (iso ? new Date(iso).toLocaleTimeString('fr-FR', { hour: '
 function flipBlock(f) {
   const box = el('div', 'block');
   box.append(el('h3', null, 'Achat-revente'));
-  box.append(el('p', 'muted line', `Dernier passage : ${ago(f.lastPassAt)}${f.error ? ` · erreur : ${f.error}` : ''}`));
-  box.append(el('p', 'muted line', `Enchères suivies ${f.bids} · à revendre ${f.toResell}${f.waiting ? ` (${f.waiting} en attente d'une place)` : ''} · achats ${f.bought} · ventes ${f.sold} · bénéfice ${f.profit >= 0 ? '+' : ''}${num(f.profit)}`));
+  box.append(el('p', 'muted line', `Dernier passage ${ago(f.lastPassAt)}.${f.error ? ` Erreur : ${f.error}` : ''}`));
+  const g = el('div', 'kv');
+  for (const [k, v] of [['Enchères suivies', f.bids], ['À revendre', f.waiting ? `${f.toResell} (${f.waiting} sans place)` : f.toResell], ['Achats', f.bought], ['Ventes', f.sold], ['Bénéfice', `${f.profit >= 0 ? '+' : ''}${num(f.profit)}`]]) { const d = el('div'); d.append(el('span', 'k', k), el('b', null, String(v))); g.append(d); }
+  box.append(g);
   const ol = el('ol', 'flog');
   for (const l of f.log.slice().reverse()) { const li = el('li'); li.append(el('time', 'muted', hhmm(l.at)), el('span', null, l.text)); ol.append(li); }
   if (!f.log.length) ol.append(el('li', 'muted', 'Aucune enchère pour le moment.'));
@@ -197,44 +208,43 @@ function addBar() {
 }
 
 async function accountCard(bot, globalChoice) {
-  const card = el('article', bot.disabled ? 'card off' : 'card');
-  const head = el('div', 'head');
   const s = bot.status;
+  const state = bot.disabled ? 'off' : bot.online ? 'live' : 'down';
+  const card = el('article', `card ${state}`);
   const pseudo = (s && s.account && s.account.user) || bot.name;
+  const head = el('header', 'head');
   const title = el('div', 'title');
   title.append(el('h2', null, pseudo), profileLink(pseudo));
-  head.append(title);
-  head.append(el('span', bot.disabled ? 'pill off' : bot.online ? 'pill ok' : 'pill bad', bot.disabled ? 'Désactivé' : bot.online ? 'En ligne' : 'Hors ligne'));
+  const label = { off: 'Désactivé', live: 'En ligne', down: 'Hors ligne' }[state];
+  head.append(title, el('span', `status ${state}`, label));
   card.append(head);
-  if (bot.disabled) { card.append(el('p', 'muted', 'Ce compte ne tourne pas.')); if (manage) card.append(fold(bot.name, 'Gérer', manageBlock(bot, card))); return card; }
-  if (!s) {
-    card.append(el('p', 'muted', bot.error || 'Démarrage en cours…'));
-    if (manage) card.append(fold(bot.name, 'Gérer', manageBlock(bot, card)));
-    return card;
-  }
-  if (!bot.online) card.append(el('p', 'muted', bot.error || `Dernier contact : ${ago(bot.lastSeen)}`));
-  if (!manage && bot.name !== (s.account && s.account.user)) card.append(el('p', 'muted', `Bot « ${bot.name} »`));
-  const grid = el('div', 'grid');
-  if (s.account) {
-    grid.append(stat('Pièces', num(s.account.balance)));
-    grid.append(stat('Énergie', `${num(s.account.energy.stock)}/${num(s.account.energy.max)}`, s.account.energy.stock, s.account.energy.max));
-  } else grid.append(stat('Session', 'perdue'));
-  grid.append(stat('Échanges', `${num(s.trades.open)}/${s.trades.max}`, s.trades.open, s.trades.max));
-  grid.append(stat('Ventes', `${num(s.sales.selling)}/${num(s.sales.max)}`, s.sales.selling, s.sales.max));
-  card.append(grid);
-  // Un résumé du booster et des scripts reste visible ; le détail se déplie
-  const on = s.scripts.filter((x) => x.on).length;
-  const choice = bot.booster.choice.mode === 'global' ? 'global' : bot.booster.choice.mode === 'auto' ? 'auto' : 'série fixe';
-  card.append(el('p', 'muted line', `Booster ${choice} · ${on}/${s.scripts.length} scripts${bot.booster.error ? ' · booster non appliqué' : ''}`));
-  if (bot.online) {
-    const r = el('button', 'ghost small', 'Redémarrer');
-    r.addEventListener('click', async () => { if (await confirmBox(`Redémarrer ${bot.name} ?`, 'Le navigateur du compte est relancé et les scripts sont retéléchargés.', 'Redémarrer')) act(card, () => api('POST', `/api/bots/${encodeURIComponent(bot.name)}/restart`).then(() => toast('Redémarrage demandé'))); });
-    const parts = [boosterBlock(bot, card, globalChoice), scriptsBlock(bot, card)];
-    if (s.flip && s.scripts.some((x) => x.name === 'achat-revente' && x.on)) parts.push(flipBlock(s.flip));
-    if (manage) parts.push(manageBlock(bot, card));
-    parts.push(r);
-    card.append(fold(bot.name, 'Réglages', ...parts));
-  } else if (manage) card.append(fold(bot.name, 'Gérer', manageBlock(bot, card)));
+  const manageFold = () => fold(bot.name, 'Gérer le compte', manageBlock(bot, card));
+
+  if (bot.disabled) { card.append(el('p', 'note', 'Ce compte ne tourne pas. Active-le dans Gérer le compte.')); if (manage) card.append(manageFold()); return card; }
+  if (!s) { card.append(el('p', 'note', bot.error || 'Démarrage en cours…')); if (manage) card.append(manageFold()); return card; }
+  if (!bot.online) card.append(el('p', 'note bad', bot.error || `Plus de nouvelles depuis ${ago(bot.lastSeen).replace('il y a ', '')}.`));
+  if (!manage && bot.name !== (s.account && s.account.user)) card.append(el('p', 'note', `Bot ${bot.name}`));
+
+  const coins = el('p', 'coins');
+  if (s.account) { coins.append(el('b', null, num(s.account.balance)), el('span', null, ' pièces')); }
+  else coins.append(el('span', 'bad', 'Session perdue, reconnexion en cours'));
+  card.append(coins);
+  const meters = el('div', 'meters');
+  if (s.account) meters.append(meter('Énergie', s.account.energy.stock, s.account.energy.max));
+  meters.append(meter('Échanges', s.trades.open, s.trades.max), meter('Ventes', s.sales.selling, s.sales.max));
+  card.append(meters);
+
+  if (!bot.online) { if (manage) card.append(manageFold()); return card; }
+  card.append(scriptChips(bot, card));
+  const r = el('button', 'ghost small', 'Redémarrer');
+  r.addEventListener('click', async () => { if (await confirmBox(`Redémarrer ${bot.name} ?`, 'Le navigateur du compte est relancé et les scripts sont retéléchargés.', 'Redémarrer')) act(card, () => api('POST', `/api/bots/${encodeURIComponent(bot.name)}/restart`).then(() => toast(`${bot.name} redémarre`))); });
+  const parts = [boosterBlock(bot, card, globalChoice)];
+  if (s.flip && s.scripts.some((x) => x.name === 'achat-revente' && x.on)) parts.push(flipBlock(s.flip));
+  const acts = manage ? manageBlock(bot, card) : el('div', 'actions');
+  acts.prepend(r);
+  parts.push(acts);
+  const choice = bot.booster.choice.mode === 'global' ? 'booster global' : bot.booster.choice.mode === 'auto' ? 'booster auto' : 'booster fixe';
+  card.append(fold(bot.name, bot.booster.error ? 'Réglages (booster non appliqué)' : `Réglages, ${choice}`, ...parts));
   return card;
 }
 
@@ -247,12 +257,12 @@ function renderAlerts(alerts) {
     x.type = 'button'; x.title = 'Fermer cette alerte'; x.setAttribute('aria-label', 'Fermer cette alerte');
     x.addEventListener('click', () => { row.remove(); api('POST', '/api/alerts/dismiss', { key: a.key }).catch(() => {}); });
     const msg = el('span', null);
-    msg.append(el('b', null, a.bot), ` · ${a.text} `, profileLink(a.bot, 'profile inline-link'));
+    msg.append(el('b', null, a.bot), ` ${a.text} `, profileLink(a.bot, 'profile inline-link'));
     row.append(msg, x);
     box.append(row);
   }
   if (alerts.length > 1) {
-    const all = el('button', 'ghost small', 'Tout fermer');
+    const all = el('button', 'ghost small dismiss-all', 'Tout fermer');
     all.type = 'button';
     all.addEventListener('click', () => { box.replaceChildren(); api('POST', '/api/alerts/dismiss', { all: true, keys: alerts.map((a) => a.key) }).catch(() => {}); });
     box.append(all);
@@ -265,13 +275,13 @@ function renderSummary(d) {
   const online = live.filter((b) => b.online).length;
   const coins = d.bots.reduce((t, b) => t + ((b.status && b.status.account && b.status.account.balance) || 0), 0);
   const trades = d.bots.reduce((t, b) => t + ((b.status && b.status.trades && b.status.trades.open) || 0), 0);
-  box.replaceChildren();
-  const chip = (k, v, cls) => { const c = el('div', `chip ${cls || ''}`); c.append(el('span', 'k', k), el('b', null, v)); box.append(c); };
-  chip('Comptes en ligne', `${online}/${live.length}`, live.length && online < live.length ? 'warnc' : '');
-  chip('Pièces au total', num(coins));
-  chip('Échanges ouverts', num(trades));
   const n = d.alerts.length;
-  chip('Alertes', String(n), n ? 'warnc' : '');
+  box.replaceChildren();
+  const cell = (k, v, warn) => { const c = el('div', warn ? 'cell warn' : 'cell'); c.append(el('b', null, v), el('span', null, k)); box.append(c); };
+  cell(live.length > 1 ? 'comptes en ligne' : 'compte en ligne', `${online}/${live.length}`, live.length && online < live.length);
+  cell('pièces sur la flotte', num(coins));
+  cell(trades > 1 ? 'échanges ouverts' : 'échange ouvert', num(trades));
+  cell(n > 1 ? 'alertes' : 'alerte', String(n), n > 0);
 }
 
 function renderLogs(lines) {

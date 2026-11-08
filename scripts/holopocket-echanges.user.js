@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.12
+// @version      3.13
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord, avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, et des pièces du compte une fois par heure, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
@@ -574,13 +574,13 @@
         if (info.spare >= 1) ids.push(info.ids[0]);
         await sleep(CONFIG.DELAY / 2);
       }
-      // Pièces du compte, au plus une fois par heure, avec les cartes ou seules
+      // Pièces du compte, au plus une fois par heure, jointes à un échange qui contient au moins une carte
       let coins = 0;
       if (CONFIG.PRIORITY_COINS && Date.now() >= lsNum(PRIORITY_COINS_KEY)) {
         try { coins = Math.max(0, Math.floor(((await api('GET', '/me')).me || {}).balance || 0) - CONFIG.PRIORITY_COINS_KEEP); } catch {}
         if (coins < CONFIG.PRIORITY_COINS_MIN) coins = 0;
       }
-      if (!ids.length && !coins) { later(CONFIG.PRIORITY_IDLE_MIN); return false; }
+      if (!ids.length) { later(CONFIG.PRIORITY_IDLE_MIN); return false; } // le site exige au moins une carte : pas d'échange de pièces seules
       const send = (c) => api('POST', '/trades', {
         toUsername: target,
         offeredUserCardIds: ids,
@@ -591,7 +591,7 @@
       try { await send(coins); }
       catch (e) {
         // Le site refuse les pièces de ce côté : on renvoie les cartes seules et on réessaie les pièces dans 6 h
-        if (!coins || !ids.length || !/pi[eè]ce|coin|solde|balance|insuffisan/i.test(e.message)) throw e;
+        if (!coins || !/pi[eè]ce|coin|solde|balance|insuffisan/i.test(e.message)) throw e;
         coins = 0; lsSet(PRIORITY_COINS_KEY, Date.now() + 6 * 3600000);
         await send(0);
       }
@@ -600,7 +600,7 @@
       writeLocal([...readLocal(), { to: target, at: Date.now() }]);
       if (openTrades != null) openTrades++;
       lastPriorityErr = ''; priorityErrs = 0; failStreak = 0; lsSet(PRIORITY_NEXT_KEY, 0);
-      UI.toast(`<b>Échange prioritaire</b> : ${[ids.length ? `${ids.length} carte(s)` : '', coins ? `${coins} pièces` : ''].filter(Boolean).join(' + ')} proposée(s) à ${esc(target)}`, { kind: 'success', ms: 12000 });
+      UI.toast(`<b>Échange prioritaire</b> : ${[`${ids.length} carte(s)`, coins ? `${coins} pièces` : ''].filter(Boolean).join(' + ')} proposée(s) à ${esc(target)}`, { kind: 'success', ms: 12000 });
       return true;
     } catch (e) {
       priorityErrs++;

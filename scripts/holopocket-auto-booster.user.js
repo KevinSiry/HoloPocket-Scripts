@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Ouverture auto dès que l'énergie suffit
 // @namespace    kevin.holopocket
-// @version      2.5
+// @version      2.6
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-auto-booster.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-auto-booster.user.js
 // @description  Surveille l'énergie en arrière-plan. Dès qu'elle suffit (énergie bonus comprise), ouvre 1 booster de la série favorite qui a le plus de chance de donner une nouvelle carte (ou d'une série fixe choisie dans le panel).
@@ -127,6 +127,9 @@
       if (me.quarantined) { stop(`Compte en quarantaine — surveillance stoppée.`); return; }
 
       // Dès que l'énergie (bonus comprise) couvre le coût d'un booster, on ouvre
+      // Le coût retenu vaut pour le choix du moment : il est oublié si la série imposée change, ou après 10 min
+      const choice = `${readLS('hp-booster-force')}|${readLS('hp-booster-default')}`;
+      if (choice !== state.costFor || Date.now() - (state.costAt || 0) > 600000) { state.lastCost = 0; state.costFor = choice; state.costAt = Date.now(); }
       while (state.on && packs.stock != null && usable(packs) >= (state.lastCost || 1) && state.opens < CONFIG.MAX_OPENS) {
         const best = await pickBestSet();
         if (!best) { stop('Aucune série en favori (et aucun booster par défaut).'); return; }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Achat des cartes manquantes bradées
 // @namespace    kevin.holopocket
-// @version      1.7
+// @version      1.8
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-manquantes.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-manquantes.user.js
 // @description  Mode auto : enchérit (mise minimale) sur les ventes qui se terminent dans moins de 5 min quand la carte te manque et qu'elle part à 70 % du prix moyen ou moins. N'achète rien pour revendre.
@@ -187,7 +187,7 @@
       picks.push({ a, ref: info.ref, max, saving: info.ref - a.minBid });
     }
     picks.sort((x, y) => y.saving - x.saving || x.a.minBid - y.a.minBid);
-    const seen = new Set([...leadKeys, ...[...aimedAt.keys()].filter((k) => !picks.some((p) => keyOf(p.a.card.id, p.a.reverse) === k && String(p.a.id) === aimedAt.get(k)))]);
+    const seen = new Set(leadKeys); // le tri amont n'a gardé, par carte déjà visée, que la vente visée
     let placed = 0;
     for (const p of picks) {
       if (placed >= CONFIG.MAX_BIDS_PER_PASS) break;

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.19
+// @version      3.20
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord, avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, et des pièces du compte une fois par heure, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
@@ -231,26 +231,42 @@
     // Propositions encore en attente dont la situation a changé : mon dernier exemplaire est proposé, ou une carte demandée est déjà à moi
     const live = sent.filter((t) => t.status === 'pending' && t.id != null && (!t.from || !myName || t.from === myName) && !old.includes(t) && !isPriority(t.to));
     const copiesOf = new Map(); // fiche de carte lue une seule fois par contrôle
+    // { n: exemplaires possédés, listed: dont en vente } pour cette version de la carte ; null si la fiche est illisible
     const owned = async (c, reverse) => {
       if (!copiesOf.has(c.id)) { try { copiesOf.set(c.id, (await api('GET', `/cards/${encodeURIComponent(c.id)}`)).mine || {}); } catch { copiesOf.set(c.id, null); } await sleep(CONFIG.DELAY / 2); }
       const m = copiesOf.get(c.id);
       if (!m) return null; // illisible : on ne touche à rien
-      return reverse ? (m.reverseCopies || 0) : (m.copies || 0) - (m.reverseCopies || 0);
+      return reverse ? { n: m.reverseCopies || 0, listed: m.listedReverse || 0 } : { n: (m.copies || 0) - (m.reverseCopies || 0), listed: m.listed || 0 };
     };
+    const kOf = (x) => { const c = x.card || x; return c && c.id ? { c, rev: !!(x.reverse ?? c.reverse), k: `${c.id}|${!!(x.reverse ?? c.reverse)}` } : null; };
+    // Exemplaires déjà engagés ailleurs : les dons au joueur prioritaire d'abord (jamais annulés ici), puis chaque proposition gardée.
+    // Un exemplaire en vente est compté comme parti : « en vente + promis » ne doit jamais vider la carte.
+    const committed = new Map();
+    const commit = (t) => { for (const x of t.offered || []) { const o = kOf(x); if (o) committed.set(o.k, (committed.get(o.k) || 0) + 1); } };
+    for (const t of sent) if (t.status === 'pending' && isPriority(t.to) && (!t.from || !myName || t.from === myName)) commit(t);
+    const wanted = new Set(); // carte demandée dans une proposition gardée : une seule demande par carte
     const invalid = [];
-    for (const t of live) {
+    for (const t of live.slice().sort((a, b) => (Date.parse(a.createdAt) || 0) - (Date.parse(b.createdAt) || 0))) { // les plus anciennes gardent la priorité
       let why = null;
-      for (const x of t.offered || []) { // mon côté : un seul exemplaire possédé = le dernier, on ne le donne pas
-        const c = x.card || x; if (!c || !c.id) continue;
-        const k = await owned(c, !!(x.reverse ?? c.reverse));
-        if (k != null && k <= 1) { why = `dernier exemplaire de ${c.name || c.id}`; break; }
+      const mine = new Map(); // exemplaires de chaque carte donnés par CETTE proposition
+      for (const x of t.offered || []) { // mon côté : il doit me rester au moins un exemplaire après tous mes engagements
+        const o = kOf(x); if (!o) continue;
+        const info = await owned(o.c, o.rev);
+        if (!info) continue;
+        const here = (mine.get(o.k) || 0) + 1; mine.set(o.k, here);
+        if (info.n - info.listed - (committed.get(o.k) || 0) - here < 1) {
+          why = info.n <= 1 ? `dernier exemplaire de ${o.c.name || o.c.id}` : `${o.c.name || o.c.id} : les autres exemplaires sont en vente ou déjà promis`;
+          break;
+        }
       }
-      if (!why) for (const x of t.requested || []) { // leur côté : une carte demandée que j'ai déjà
-        const c = x.card || x; if (!c || !c.id) continue;
-        const k = await owned(c, !!(x.reverse ?? c.reverse));
-        if (k != null && k >= 1) { why = `${c.name || c.id} déjà possédée`; break; }
+      if (!why) for (const x of t.requested || []) { // leur côté : une carte demandée que j'ai déjà, ou déjà demandée ailleurs
+        const o = kOf(x); if (!o) continue;
+        const info = await owned(o.c, o.rev);
+        if (info && info.n >= 1) { why = `${o.c.name || o.c.id} déjà possédée`; break; }
+        if (wanted.has(o.k)) { why = `${o.c.name || o.c.id} déjà demandée dans une autre proposition`; break; }
       }
       if (why) invalid.push({ t, why });
+      else { commit(t); for (const x of t.requested || []) { const o = kOf(x); if (o) wanted.add(o.k); } }
     }
     for (const { t, why } of invalid) {
       try {
@@ -639,8 +655,9 @@
       let requested = [];
       if (CONFIG.PRIORITY_MATCH && offered.length) {
         const tol = (v) => Math.max(v * CONFIG.PRIORITY_MATCH_TOL, CONFIG.TOL_ABS);
-        const theirs = list(await api('GET', `/users/${encodeURIComponent(target)}/cards`))
-          .filter((c) => !inBinder(c) && (c.copies ?? 1) >= 2 && (c.userCardIds || []).length && val(c) > 0)
+        // Ses doublons, lus comme dans l'échange classique (le site ne renvoie pas toujours « copies » pour un autre joueur)
+        const theirs = list(await api('GET', `/users/${encodeURIComponent(target)}/cards?duplicates=1`))
+          .filter((c) => !inBinder(c) && (c.copies ?? 2) >= 2 && (c.userCardIds || []).length && val(c) > 0)
           .sort((a, b) => val(b) - val(a));
         const total = offered.reduce((t, x) => t + x.v, 0);
         let got = 0;

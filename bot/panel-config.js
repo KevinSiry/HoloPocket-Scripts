@@ -13,6 +13,7 @@ function sanitize(raw) {
   const out = defaults();
   const b = raw && raw.booster;
   if (b && b.mode === 'fixed' && typeof b.setId === 'string' && b.setId.trim()) out.booster = { mode: 'fixed', setId: b.setId.trim() };
+  else if (b && b.mode === 'optimal') out.booster = { mode: 'optimal' };
   const sc = raw && raw.scripts;
   if (sc && typeof sc === 'object') for (const n of KNOWN_SCRIPTS) if (typeof sc[n] === 'boolean') out.scripts[n] = sc[n];
   return out;
@@ -58,7 +59,7 @@ function validatePatch(patch, sets) {
   if ('booster' in patch) {
     const b = patch.booster;
     if (!b || typeof b !== 'object') return { ok: false, error: 'booster : objet attendu' };
-    if (b.mode !== 'auto' && b.mode !== 'fixed') return { ok: false, error: 'booster.mode : auto ou fixed' };
+    if (b.mode !== 'auto' && b.mode !== 'fixed' && b.mode !== 'optimal') return { ok: false, error: 'booster.mode : auto, optimal ou fixed' };
     if (b.mode === 'fixed') {
       if (typeof b.setId !== 'string' || !b.setId.trim()) return { ok: false, error: 'booster.setId requis en mode fixed' };
       const id = b.setId.trim().toLowerCase();

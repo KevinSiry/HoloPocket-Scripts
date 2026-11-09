@@ -95,7 +95,14 @@ function toast(text, bad) {
 }
 
 // Séries proposées dans la liste du booster (hors promos), favoris marqués ★
-const setChoices = (sets) => sets.filter((x) => !x.promo).map((x) => ({ value: `set:${x.id}`, label: x.name + (x.favorite ? ' ★' : ''), search: `${x.name} ${x.id}` }));
+// Favoris d'abord, chacun dans son groupe ; le coût en énergie est affiché quand le site le donne
+const setChoices = (sets) => sets.filter((x) => !x.promo)
+  .map((x) => ({ value: `set:${x.id}`, label: x.name, star: !!x.favorite, group: x.favorite ? 'Séries favorites' : 'Autres séries', search: `${x.name} ${x.id}`,
+    hint: typeof x.packCost === 'number' ? `${x.packCost} énergie${x.packCost > 1 ? 's' : ''} par booster` : '' }))
+  .sort((a, b) => (b.star ? 1 : 0) - (a.star ? 1 : 0) || a.label.localeCompare(b.label, 'fr'));
+// Modes automatiques, toujours en tête de liste
+const MODE_OPTIMAL = { value: 'optimal', label: 'Optimisation des nouvelles cartes', group: 'Choix automatique', search: 'optimisation nouvelles cartes optimal energie', hint: 'Toutes les séries : la meilleure chance de nouvelle carte par point d’énergie' };
+const MODE_AUTO = { value: 'auto', label: 'Meilleur favori', group: 'Choix automatique', search: 'auto meilleur favori', hint: 'Parmi tes séries favorites : la meilleure chance de nouvelle carte' };
 // Recherche sans tenir compte des accents ni de la casse
 const fold_ = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
@@ -122,24 +129,43 @@ function searchSelect({ label, value, pinned = [], choices, onChange }) {
   root.append(btn, pop);
 
   let shown = [], active = -1;
-  const showCur = () => { const c = all.find((x) => x.value === value); cur.textContent = c ? c.label : value; };
+  let opts = []; // éléments sélectionnables (les titres de groupe n'en font pas partie)
+  const showCur = () => { const c = all.find((x) => x.value === value); cur.textContent = c ? `${c.label}${c.star ? ' ★' : ''}` : value; };
   const setActive = (i) => {
     active = i;
-    [...list.children].forEach((li, k) => { li.classList.toggle('active', k === i); li.setAttribute('aria-selected', String(k === i)); });
-    const li = list.children[i];
+    opts.forEach((li, k) => { li.classList.toggle('active', k === i); li.setAttribute('aria-selected', String(k === i)); });
+    const li = opts[i];
     if (li) { q.setAttribute('aria-activedescendant', li.id); li.scrollIntoView({ block: 'nearest' }); } else q.removeAttribute('aria-activedescendant');
   };
   const render = (onCurrent) => {
     const t = fold_(q.value.trim());
     shown = t ? all.filter((c) => fold_(c.search || c.label).includes(t)) : all;
-    list.replaceChildren(...shown.map((c, k) => {
-      const li = el('li', c.value === value ? 'cur' : null, c.label);
+    const nodes = [];
+    opts = [];
+    let group = null;
+    shown.forEach((c, k) => {
+      if (c.group && c.group !== group) { // titre de groupe : repère visuel, jamais sélectionnable
+        group = c.group;
+        const n = shown.filter((x) => x.group === group).length;
+        const h = el('li', 'combo-group', n > 1 && group !== 'Choix automatique' ? `${group} (${n})` : group);
+        h.setAttribute('role', 'presentation');
+        nodes.push(h);
+      }
+      const li = el('li', c.value === value ? 'opt cur' : 'opt');
       li.id = `${id}-o${k}`; li.setAttribute('role', 'option');
+      const main = el('span', 'opt-main');
+      main.append(el('span', 'opt-label', c.label));
+      if (c.star) { const st = el('span', 'opt-star', '★'); st.setAttribute('aria-label', 'favorite'); main.append(st); }
+      if (c.value === value) { const ok = el('span', 'opt-check', '✓'); ok.setAttribute('aria-label', 'choix actuel'); main.append(ok); }
+      li.append(main);
+      if (c.hint) li.append(el('span', 'opt-hint', c.hint));
       li.addEventListener('mousedown', (e) => e.preventDefault()); // garde le focus dans la recherche
       li.addEventListener('click', () => pick(c));
       li.addEventListener('mousemove', () => { if (active !== k) setActive(k); });
-      return li;
-    }));
+      nodes.push(li); opts.push(li);
+    });
+    list.replaceChildren(...nodes);
+    empty.textContent = `Aucune série ne correspond à « ${q.value.trim()} »`;
     empty.hidden = shown.length > 0;
     const i = onCurrent ? shown.findIndex((c) => c.value === value) : 0;
     setActive(shown.length ? Math.max(0, i) : -1);
@@ -192,10 +218,10 @@ function searchSelect({ label, value, pinned = [], choices, onChange }) {
   showCur();
   return root;
 }
-const describe = (c, sets) => (c.mode === 'fixed' ? (sets.find((x) => x.id === c.setId) || { name: c.setId }).name : 'Auto (meilleur favori)');
+const describe = (c, sets) => (c.mode === 'fixed' ? (sets.find((x) => x.id === c.setId) || { name: c.setId }).name : c.mode === 'optimal' ? MODE_OPTIMAL.label : MODE_AUTO.label);
 // valeur du <select> <-> choix
-const toValue = (c) => (c.mode === 'global' ? 'global' : c.mode === 'auto' ? 'auto' : `set:${c.setId}`);
-const fromValue = (v) => (v === 'global' ? { mode: 'global' } : v === 'auto' ? { mode: 'auto' } : { mode: 'fixed', setId: v.slice(4) });
+const toValue = (c) => (c.mode === 'global' ? 'global' : c.mode === 'auto' ? 'auto' : c.mode === 'optimal' ? 'optimal' : `set:${c.setId}`);
+const fromValue = (v) => (v === 'global' ? { mode: 'global' } : v === 'auto' ? { mode: 'auto' } : v === 'optimal' ? { mode: 'optimal' } : { mode: 'fixed', setId: v.slice(4) });
 const sendBooster = (url, v) => api('PUT', url, fromValue(v)).then((r) => {
   if (r.failed && r.failed.length) toast(`Refusé par : ${r.failed.map((f) => `${f.name} (${f.error})`).join(', ')}`, true);
   else toast('Booster enregistré');
@@ -209,7 +235,7 @@ function boosterBlock(bot, card, globalChoice) {
   const sel = searchSelect({
     label: `Booster du compte ${bot.name}`,
     value: toValue(bot.booster.choice),
-    pinned: [{ value: 'global', label: `Global : ${describe(globalChoice, sets)}` }, { value: 'auto', label: 'Auto (meilleur favori)' }],
+    pinned: [{ value: 'global', label: 'Suivre le réglage global', group: 'Choix automatique', search: 'global suivre', hint: `Actuellement : ${describe(globalChoice, sets)}` }, MODE_OPTIMAL, MODE_AUTO],
     choices: setChoices(sets),
     onChange: (v) => act(card, () => sendBooster(`/api/bots/${encodeURIComponent(bot.name)}/booster`, v)),
   });
@@ -217,6 +243,7 @@ function boosterBlock(bot, card, globalChoice) {
   box.lastChild.append(sel);
   if (bot.booster.error) box.append(el('p', 'err', `Non appliqué : ${bot.booster.error}`));
   else if (s.booster.mode === 'auto' && s.booster.favorites.length) box.append(el('p', 'muted', `Favoris : ${s.booster.favorites.map((f) => f.name).join(', ')}`));
+  else if (s.booster.mode === 'optimal') box.append(el('p', 'muted', 'Toutes les séries sont comparées : chance de nouvelle carte divisée par le coût en énergie.'));
   return box;
 }
 
@@ -228,7 +255,7 @@ function globalBar(globalChoice, bots) {
   const sel = searchSelect({
     label: 'Booster global',
     value: toValue(globalChoice),
-    pinned: [{ value: 'auto', label: 'Auto (meilleur favori)' }],
+    pinned: [MODE_OPTIMAL, MODE_AUTO],
     choices: setChoices(sets),
     onChange: (v) => act(bar, () => sendBooster('/api/booster/global', v)),
   });
@@ -337,7 +364,7 @@ async function accountCard(bot, globalChoice) {
   const acts = manage ? manageBlock(bot, card) : el('div', 'actions');
   acts.prepend(r);
   parts.push(acts);
-  const choice = bot.booster.choice.mode === 'global' ? 'booster global' : bot.booster.choice.mode === 'auto' ? 'booster auto' : 'booster fixe';
+  const choice = bot.booster.choice.mode === 'global' ? 'booster global' : bot.booster.choice.mode === 'auto' ? 'meilleur favori' : bot.booster.choice.mode === 'optimal' ? 'booster optimisé' : 'booster fixe';
   card.append(fold(bot.name, bot.booster.error ? 'Réglages (booster non appliqué)' : `Réglages, ${choice}`, ...parts));
   return card;
 }

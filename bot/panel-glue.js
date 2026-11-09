@@ -134,7 +134,7 @@ function createGlue(deps) {
       await pushToggles();
       if (changed) await load();
       statusCache = { at: 0, v: null };
-      if (patch.booster) log('Panel · booster :', merged.booster.mode === 'fixed' ? `série fixe ${merged.booster.setId}` : 'auto (meilleur favori)');
+      if (patch.booster) log('Panel · booster :', merged.booster.mode === 'fixed' ? `série fixe ${merged.booster.setId}` : merged.booster.mode === 'optimal' ? 'optimisation des nouvelles cartes' : 'auto (meilleur favori)');
       if (patch.scripts) log('Panel · scripts :', cfg.scripts.map(pc.toName).join(', ') || 'aucun');
       return { scriptsReloaded: changed };
     });

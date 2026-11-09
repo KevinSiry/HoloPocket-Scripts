@@ -103,6 +103,7 @@ async function startAccount(opts) {
     t['hp-booster-default'] = cfg.defaultBooster;
     t['hp-priority-target'] = cfg.priorityTarget;
     t['hp-booster-force'] = state.panelCfg.booster.mode === 'fixed' ? state.panelCfg.booster.setId : '';
+    t['hp-booster-mode'] = state.panelCfg.booster.mode === 'optimal' ? 'optimal' : '';
     return t;
   }
   cfg.toggles = buildToggles();

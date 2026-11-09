@@ -82,3 +82,14 @@ test('bot redémarré avec un autre réglage : remis au global au passage suivan
   await r.run([bot('c1', 'auto')]);
   assert.deepStrictEqual(calls, ['c1']);
 });
+
+test('mode « optimal » : conservé, suivi par les comptes, comparé sans série', () => {
+  const { createStore, same } = require('../lib/booster');
+  const s = createStore();
+  s.setGlobal({ mode: 'optimal' });
+  assert.deepStrictEqual(s.desired('c1'), { mode: 'optimal' });
+  s.setChoice('c2', { mode: 'auto' });
+  assert.deepStrictEqual(s.desired('c2'), { mode: 'auto' });
+  assert.ok(same({ mode: 'optimal' }, { mode: 'optimal', setId: null }));
+  assert.ok(!same({ mode: 'optimal' }, { mode: 'auto', setId: null }));
+});

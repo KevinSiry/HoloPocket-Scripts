@@ -1,13 +1,13 @@
 // Booster à ouvrir : un réglage global du panel que les comptes suivent par défaut, avec un choix propre à un compte possible.
-// Les bots ne connaissent que « auto » ou « série fixe » : le panel traduit le choix de chaque compte et le leur envoie.
+// Les bots connaissent « auto » (meilleur favori), « optimal » (meilleure chance par énergie, toutes séries) ou « série fixe » : le panel traduit le choix de chaque compte et le leur envoie.
 const fs = require('fs');
 
-const pick = (r) => (r && r.mode === 'fixed' && typeof r.setId === 'string' && r.setId.trim() ? { mode: 'fixed', setId: r.setId.trim() } : { mode: 'auto' });
+const pick = (r) => (r && r.mode === 'fixed' && typeof r.setId === 'string' && r.setId.trim() ? { mode: 'fixed', setId: r.setId.trim() } : r && r.mode === 'optimal' ? { mode: 'optimal' } : { mode: 'auto' });
 
 function sanitize(raw) {
   const out = { global: pick(raw && raw.global), accounts: {} };
   const acc = raw && raw.accounts;
-  if (acc && typeof acc === 'object') for (const [name, v] of Object.entries(acc)) if (v && (v.mode === 'auto' || v.mode === 'fixed')) out.accounts[name] = pick(v);
+  if (acc && typeof acc === 'object') for (const [name, v] of Object.entries(acc)) if (v && (v.mode === 'auto' || v.mode === 'fixed' || v.mode === 'optimal')) out.accounts[name] = pick(v);
   return out;
 }
 
@@ -36,7 +36,7 @@ function createStore(file) {
   };
 }
 
-const same = (a, b) => a && b && a.mode === b.mode && (a.mode === 'auto' || a.setId === b.setId);
+const same = (a, b) => a && b && a.mode === b.mode && (a.mode !== 'fixed' || a.setId === b.setId);
 
 // Remet d'aplomb les bots dont le booster diffère du voulu (changement, redémarrage, bot revenu en ligne), sans insister plus d'une fois par minute
 function createReconciler({ store, push, now = Date.now, retryMs = 60000 }) {

@@ -144,11 +144,17 @@ main, #alerts { max-width: 1180px; margin: 0 auto; padding: 0 1rem; }
 .combo.open .combo-caret { transform: rotate(180deg); }
 .combo-pop { position: fixed; z-index: 50; padding: .5rem; background: var(--sleeve); border: 1px solid var(--edge); border-radius: var(--r-md); box-shadow: 0 14px 36px rgba(0, 0, 0, .5); }
 .combo-pop input { min-height: 40px; }
-.combo-list { list-style: none; margin: .4rem 0 0; padding: 0; max-height: min(18rem, 45vh); overflow-y: auto; overscroll-behavior: contain; }
-.combo-list li { padding: .55rem .65rem; border-radius: var(--r-sm); cursor: pointer; overflow-wrap: anywhere; }
+.combo-list { list-style: none; margin: .4rem 0 0; padding: 0; max-height: min(22rem, 50vh); overflow-y: auto; overscroll-behavior: contain; }
+.combo-list li.opt { display: flex; flex-direction: column; gap: .1rem; padding: .5rem .65rem; min-height: 44px; justify-content: center; border-radius: var(--r-sm); cursor: pointer; overflow-wrap: anywhere; }
+.combo-group { position: sticky; top: 0; z-index: 1; padding: .55rem .65rem .25rem; background: var(--sleeve); color: var(--mist); font-size: 12px; font-weight: 650; }
+.combo-group:not(:first-child) { margin-top: .3rem; border-top: 1px solid var(--edge); }
+.opt-main { display: flex; align-items: baseline; gap: .4rem; }
+.opt-label { min-width: 0; }
+.opt-star { flex: none; color: var(--gold); font-size: 13px; }
+.opt-check { flex: none; margin-left: auto; color: var(--gold); font-weight: 700; }
+.opt-hint { color: var(--mist); font-size: 12px; line-height: 1.35; }
 .combo-list li.active { background: var(--sleeve-2); box-shadow: inset 2px 0 0 var(--gold); }
-.combo-list li.cur { color: var(--gold); font-weight: 600; }
-.combo-list li.cur::after { content: " ✓"; }
+.combo-list li.cur .opt-label { color: var(--gold); font-weight: 600; }
 .combo-empty { margin: .6rem .4rem .3rem; }
 @media (max-width: 640px) { .combo-btn { min-width: 0; width: 100%; } .combo { width: 100%; } }
 @media (prefers-reduced-motion: reduce) { .combo-caret { transition: none; } }

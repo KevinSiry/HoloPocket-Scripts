@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         HoloPocket – Ouverture auto dès que l'énergie suffit
 // @namespace    kevin.holopocket
-// @version      2.6
-// @description  Surveille l'énergie en arrière-plan. Dès qu'elle suffit (énergie bonus comprise), ouvre 1 booster de la série favorite qui a le plus de chance de donner une nouvelle carte (ou d'une série fixe choisie dans le panel).
+// @version      2.7
+// @description  Surveille l'énergie en arrière-plan. Dès qu'elle suffit (énergie bonus comprise), ouvre 1 booster de la série favorite qui a le plus de chance de donner une nouvelle carte (ou d'une série fixe, ou de la série la plus rentable en nouvelles cartes par point d'énergie, selon le réglage du panel).
 // @match        https://holopocket.fr/*
 // @grant        none
 // @run-at       document-idle
@@ -71,8 +71,36 @@
   }
   const readLS = (k) => { try { return (localStorage.getItem(k) || '').trim(); } catch { return ''; } };
 
+  // Chance de nouvelle carte d'une série. ttl > 0 : valeur gardée ce temps-là (mode « optimisation », qui regarde toutes les séries)
+  const chanceCache = new Map(); // id → { at, row }
+  const skipUntil = new Map();   // série refusée par le site en mode optimisation → ignorée 1 h
+  async function rowOf(s, ttl = 0) {
+    const c = chanceCache.get(s.id);
+    if (c && Date.now() - c.at < ttl) return c.row;
+    const id = encodeURIComponent(s.id);
+    const [booster, detail] = await Promise.all([api('GET', `/sets/${id}/booster`), api('GET', `/sets/${id}`)]);
+    const row = { id: s.id, name: s.name, cost: booster.cost ?? s.packCost ?? 1, chance: chanceNewCard(booster, detail.cards || []) };
+    chanceCache.set(s.id, { at: Date.now(), row });
+    return row;
+  }
+  const optimalMode = () => readLS('hp-booster-mode') === 'optimal' && !readLS('hp-booster-force');
+
+  // Mode « optimisation des nouvelles cartes » : parmi TOUTES les séries, la meilleure chance de nouvelle carte par point d'énergie
+  async function pickOptimal(all) {
+    const rows = [];
+    for (const s of all.filter((x) => !x.promo && !(skipUntil.get(x.id) > Date.now()))) {
+      try { rows.push(await rowOf(s, 30 * 60000)); } catch {} // série illisible : ignorée ce tour-ci
+      await sleep(120);
+    }
+    const useful = rows.filter((r) => r.chance > 0 && r.cost > 0);
+    if (!useful.length) return null; // plus aucune nouvelle carte possible : on retombe sur les favoris
+    useful.sort((a, b) => b.chance / b.cost - a.chance / a.cost || a.cost - b.cost || b.chance - a.chance);
+    return { ...useful[0], optimal: true };
+  }
+
   async function pickBestSet() {
     const all = await api('GET', '/sets');
+    if (optimalMode()) { const best = await pickOptimal(all); if (best) return best; }
     // Série fixe (réglée depuis le panel : localStorage 'hp-booster-force' = id ou nom) : toujours cette série
     const force = readLS('hp-booster-force');
     let sets;
@@ -89,11 +117,7 @@
         if (!sets.length) throw new Error(`Booster par défaut « ${def} » introuvable`);
       }
     }
-    const rows = await Promise.all(sets.map(async (s) => {
-      const id = encodeURIComponent(s.id);
-      const [booster, detail] = await Promise.all([api('GET', `/sets/${id}/booster`), api('GET', `/sets/${id}`)]);
-      return { id: s.id, name: s.name, cost: booster.cost ?? s.packCost ?? 1, chance: chanceNewCard(booster, detail.cards || []) };
-    }));
+    const rows = await Promise.all(sets.map((s) => rowOf(s)));
     rows.sort((a, b) => b.chance - a.chance);
     return rows[0];
   }
@@ -126,14 +150,17 @@
 
       // Dès que l'énergie (bonus comprise) couvre le coût d'un booster, on ouvre
       // Le coût retenu vaut pour le choix du moment : il est oublié si la série imposée change, ou après 10 min
-      const choice = `${readLS('hp-booster-force')}|${readLS('hp-booster-default')}`;
+      const choice = `${readLS('hp-booster-force')}|${readLS('hp-booster-default')}|${readLS('hp-booster-mode')}`;
       if (choice !== state.costFor || Date.now() - (state.costAt || 0) > 600000) { state.lastCost = 0; state.costFor = choice; state.costAt = Date.now(); }
       while (state.on && packs.stock != null && usable(packs) >= (state.lastCost || 1) && state.opens < CONFIG.MAX_OPENS) {
         const best = await pickBestSet();
         if (!best) { stop('Aucune série en favori (et aucun booster par défaut).'); return; }
         state.lastCost = best.cost;
         if (best.cost > usable(packs)) break;
-        const res = await openOne(best);
+        let res;
+        try { res = await openOne(best); }
+        catch (e) { if (best.optimal) skipUntil.set(best.id, Date.now() + 3600000); throw e; } // série refusée : une autre sera choisie au prochain passage
+        chanceCache.delete(best.id); // la collection de cette série vient de changer
         state.opens++;
         state.lastSet = best;
         state.lastCards = res.cards || [];

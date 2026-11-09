@@ -168,7 +168,7 @@ function createApp(opts) {
       }
 
       // Booster : réglage global et choix par compte (c'est le panel qui l'envoie aux bots)
-      const okChoice = (v, allowGlobal) => v && typeof v === 'object' && (v.mode === 'auto' || (allowGlobal && v.mode === 'global') || (v.mode === 'fixed' && typeof v.setId === 'string' && v.setId.trim()));
+      const okChoice = (v, allowGlobal) => v && typeof v === 'object' && (v.mode === 'auto' || v.mode === 'optimal' || (allowGlobal && v.mode === 'global') || (v.mode === 'fixed' && typeof v.setId === 'string' && v.setId.trim()));
       if (req.method === 'PUT' && (p === '/api/booster/global' || /^\/api\/bots\/[^/]+\/booster$/.test(p))) {
         let v; try { v = JSON.parse(await readBody(req)); } catch (e) { if (e.status) throw e; return send(res, 400, { error: 'JSON invalide' }); }
         const isGlobal = p === '/api/booster/global';

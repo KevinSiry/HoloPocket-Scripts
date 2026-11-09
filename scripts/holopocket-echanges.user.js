@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.18
+// @version      3.19
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord, avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, et des pièces du compte une fois par heure, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
@@ -26,6 +26,8 @@
     // Anti-spam, par joueur ciblé
     PLAYER_COOLDOWN_H: 24,   // une seule proposition par joueur toutes les 24 h
     DECLINED_COOLDOWN_H: 72, // 3 jours si le joueur a refusé ta dernière proposition
+    SILENT_COOLDOWN_H: 72,   // 3 jours si le joueur a laissé expirer ta proposition sans répondre (probablement inactif)
+    SILENT_LONG_COOLDOWN_H: 168, // 7 jours à partir de la 2e proposition laissée sans réponse
     ACCEPTED_COOLDOWN_H: 1,  // seulement 1 h si le joueur a accepté ta dernière proposition
     CANCEL_AFTER_H: 5,       // une proposition sans réponse depuis 5 h est annulée automatiquement
     MIN_GAP_S: 0,            // délai minimum entre deux envois, en secondes (0 = aucun)
@@ -141,6 +143,18 @@
   const writeLocal = (arr) => { try { localStorage.setItem(LOG_KEY, JSON.stringify(arr.slice(-200))); } catch {} };
   const H = 3600 * 1000;
 
+  // Joueurs qui laissent expirer nos propositions (probablement inactifs) : { pseudo: { n, at } }.
+  // La pause s'allonge à chaque proposition annulée sans réponse ; une réponse (acceptée ou refusée) la remet à zéro.
+  const SILENT_KEY = 'hp-trade-silent';
+  const readSilent = () => { try { return JSON.parse(localStorage.getItem(SILENT_KEY) || '{}'); } catch { return {}; } };
+  const writeSilent = (m) => { try { localStorage.setItem(SILENT_KEY, JSON.stringify(m)); } catch {} };
+  function markSilent(player) {
+    const m = readSilent(); const prev = m[player] || { n: 0 };
+    m[player] = { n: prev.n + 1, at: Date.now() };
+    const keys = Object.keys(m); if (keys.length > 500) for (const k of keys.sort((a, b) => m[a].at - m[b].at).slice(0, keys.length - 500)) delete m[k];
+    writeSilent(m);
+  }
+
   // Propositions en attente + historique → cartes engagées, joueurs déjà sollicités, rythme d'envoi
   async function tradeLog(me) {
     const asked = new Set(), offered = new Map();
@@ -177,6 +191,11 @@
       const at = accepted ? (Date.parse(t.resolvedAt || t.updatedAt) || created) : created;
       note(t.to, at, t.status === 'declined', accepted);
       sendTimes.push(created);
+      // Il a répondu (accepté ou refusé) après sa dernière proposition ignorée : plus considéré comme inactif
+      if (t.status === 'accepted' || t.status === 'declined') {
+        const sm = readSilent();
+        if (sm[t.to] && (Date.parse(t.resolvedAt || t.updatedAt) || 0) > sm[t.to].at) { delete sm[t.to]; writeSilent(sm); }
+      }
     }
     // Journal local : seulement pour les envois que le site n'affiche pas encore
     const serverAt = new Map();
@@ -244,6 +263,7 @@
     for (const t of old) {
       try {
         await api('POST', `/trades/${t.id}/cancel`); n++;
+        markSilent(t.to); // sans réponse : pause plus longue pour ce joueur
         // garde la trace : le joueur reste en pause comme s'il n'avait pas répondu
         writeLocal([...readLocal(), { to: t.to, at: Date.parse(t.createdAt) || Date.now() }]);
       } catch {}
@@ -273,6 +293,11 @@
     if (log.pendingTo.has(p)) return 'un échange est déjà ouvert avec ce joueur';
     const last = log.lastByPlayer.get(p);
     if (!last) return null;
+    const quiet = readSilent()[p];
+    if (quiet && !last.accepted && !last.declined) { // dernière proposition restée sans réponse : on laisse ce joueur tranquille plus longtemps
+      const qcd = (quiet.n >= 2 ? CONFIG.SILENT_LONG_COOLDOWN_H : CONFIG.SILENT_COOLDOWN_H) * H;
+      if (Date.now() - quiet.at < qcd) return `ne répond pas à nos propositions (${quiet.n} sans réponse)`;
+    }
     const cd = (last.declined ? CONFIG.DECLINED_COOLDOWN_H : last.accepted ? CONFIG.ACCEPTED_COOLDOWN_H : CONFIG.PLAYER_COOLDOWN_H) * H;
     if (Date.now() - last.at < cd) return last.declined ? 'a refusé récemment' : 'déjà sollicité récemment';
     return null;

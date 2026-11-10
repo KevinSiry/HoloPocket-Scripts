@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Stratège du Maître
 // @namespace    kevin.holopocket
-// @version      1.0
+// @version      1.1
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-maitre.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-maitre.user.js
 // @description  Maître de la Ligue : calcule la vraie chance de chaque annonce (d'après le contenu du booster) et choisit celle qui maximise la chance de dépasser le score du Maître avec les boosters qui restent. Mode conseil (entoure l'annonce) ou mode auto. Se met à jour sans recharger la page.
@@ -95,6 +95,7 @@
     }
 
     // Chance déduite des points quand on ne sait pas vérifier l'annonce (relevé : 2 pts ↔ 78 %, 33 pts ↔ 3,9 %)
+    const TIE = 0.005;
     const K = { facile: 1.55, risque: 1.45, folie: 1.3 };
     const implied = (call) => Math.min(0.95, (K[call.tier] || 1.4) / Math.max(1, call.points));
 
@@ -117,8 +118,28 @@
         memo.set(key, v);
         return v;
       }
-      const choices = pick(offer, left, need).sort((a, b) => (Math.abs(b.value - a.value) > 1e-9 ? b.value - a.value : 0) || (offer.find((c) => c.index === b.index).p - offer.find((c) => c.index === a.index).p));
-      return { value: choices.length ? choices[0].value : 0, choices };
+      const pOf = (i) => offer.find((c) => c.index === i).p;
+      const choices = pick(offer, left, need).sort((a, b) => b.value - a.value);
+      // Écart inférieur à un demi-point de chance : en dessous de la précision du modèle, on prend l'annonce la plus sûre
+      if (choices.length) {
+        const near = choices.filter((c) => choices[0].value - c.value < TIE);
+        const safest = near.reduce((a, b) => (pOf(b.index) > pOf(a.index) ? b : a));
+        choices.splice(choices.indexOf(safest), 1); choices.unshift(safest);
+      }
+      // Repère : ce que donnerait « toujours l'annonce la plus sûre » jusqu'au bout
+      const safeOf = (o) => o.reduce((a, b) => (b.p > a.p ? b : a));
+      const ms = new Map();
+      const step = (c, k, n) => c.p * S(k - 1, n - c.points) + (1 - c.p) * S(k - 1, n);
+      function S(k, n) {
+        if (n <= 0) return utility(k, thresholds, objective);
+        if (k <= 0) return 0;
+        const key = k * 1000 + n;
+        if (ms.has(key)) return ms.get(key);
+        let v = 0; for (const o of fut) v += step(safeOf(o), k, n);
+        v /= fut.length; ms.set(key, v); return v;
+      }
+      const safe = offer.length ? step(safeOf(offer), left, need) : 0;
+      return { value: choices.length ? choices[0].value : 0, choices, safe };
     }
 
     return { parseCall, simulate, implied, solve, stars, norm };
@@ -460,6 +481,7 @@
       <div class="hp-muted" style="font-size:12px">Encore ${need} point${need > 1 ? 's' : ''} en ${run.boosters} booster${run.boosters > 1 ? 's' : ''} · ${UI.esc(run.offer.setName)}</div>
       <div style="margin:6px 0 2px">${p.objective === 'stars' ? 'Étoiles espérées' : 'Chance de battre le Maître'} : <b>${fmtV(best.value)}</b></div>
       ${rows}
+      <div class="hp-muted" style="font-size:12px;margin-top:8px">Calculé sur tout le combat (points manquants, boosters restants). En annonçant toujours le plus sûr : ${fmtV(p.res.safe)}.</div>
       ${p.calls.some((c) => c.guessed) ? '<div class="hp-muted" style="font-size:12px;margin-top:8px">« estimée » : annonce que les données du site ne permettent pas de vérifier (PV…), chance déduite de ses points.</div>' : ''}`;
     highlight(p);
   }

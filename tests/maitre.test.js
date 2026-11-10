@@ -56,3 +56,10 @@ test('décision : valeur = formule à la main sur un cas à deux boosters', () =
   const r = E.solve({ left: 2, need: 2, offer, future: [offer], thresholds: TH, objective: 'win' });
   assert.ok(Math.abs(r.value - 0.25) < 1e-9); // deux réussites de suite, 0 booster restant → 1 étoile
 });
+
+test('quasi-égalité : on prend la plus sûre ; repère « toujours le plus sûr »', () => {
+  const offer = [{ index: 0, p: 0.783, points: 2 }, { index: 1, p: 0.483, points: 3 }, { index: 2, p: 0.0387, points: 33 }];
+  const r = E.solve({ left: 10, need: 21, offer, future: [offer], thresholds: TH, objective: 'win' });
+  assert.strictEqual(r.choices[0].index, 1); // 33,0 % contre 33,0 % pour la folie
+  assert.strictEqual(r.safe, 0); // 10 × 2 points = 20 : la sécurité seule ne peut pas atteindre 21
+});

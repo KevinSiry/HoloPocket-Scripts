@@ -409,7 +409,7 @@ function renderLogs(lines) {
   const ol = $('logList');
   ol.replaceChildren();
   for (const l of lines.slice().reverse()) {
-    const li = el('li', l.level);
+    const li = el('li', /\(nouvelle\)/.test(l.text) ? `${l.level} fresh` : l.level); // booster avec une nouvelle carte : repère doré
     const lvl = l.level === 'error' ? 'Erreur' : l.level === 'warn' ? 'Alerte' : '';
     li.append(el('time', 'muted', new Date(l.at).toLocaleTimeString('fr-FR')), el('b', null, l.bot), ...(lvl ? [el('span', 'lvl', lvl)] : []), el('span', null, l.text));
     ol.append(li);

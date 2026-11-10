@@ -56,3 +56,9 @@ test('un avertissement s’efface seul, une erreur reste, la fermeture est oubli
   assert.equal(t.apply([e], late + 3).length, 1);   // revenu après avoir cessé : réaffiché
   assert.equal(t.apply([w], late + 4).length, 1);   // l'horloge de l'avertissement repart
 });
+
+test('carte de valeur ouverte : une alerte par carte pendant 1 h', () => {
+  const at = (min) => new Date(NOW - min * 60000).toISOString();
+  const logs = [{ id: 4, level: 'warn', at: at(5), text: '› Carte de valeur : Dracaufeu, 250 pièces' }, { id: 2, level: 'warn', at: at(90), text: '› Carte de valeur : Mew, 300 pièces' }, { id: 5, level: 'info', at: at(1), text: '› Booster ouvert' }];
+  assert.deepStrictEqual(codes(bot({ logs })), ['card-4']);
+});

@@ -52,6 +52,7 @@ function buildConfig({ env, file = {}, username, password, cookie, allAccounts }
     reloadEveryH: +(env.HP_RELOAD_EVERY_H || file.reloadEveryH || 6),
     exclude: list(env.HP_EXCLUDE).length ? list(env.HP_EXCLUDE) : file.exclude || [],
     defaultBooster: env.HP_DEFAULT_BOOSTER || file.defaultBooster || '',
+    cardAlertValue: String(env.HP_ALERT_CARD_VALUE ?? file.cardAlertValue ?? '').trim(), // valeur à partir de laquelle une carte ouverte déclenche une alerte (vide = 100, 0 = jamais)
     priorityTarget: (env.HP_PRIORITY_TARGET || file.priorityTarget || '').trim(),
     baseExclude: null,
   };
@@ -101,6 +102,7 @@ async function startAccount(opts) {
     for (const n of cfg.scripts) if (TOGGLE_OF[n]) t[TOGGLE_OF[n]] = '1';
     t['hp-excluded-players'] = JSON.stringify(cfg.exclude);
     t['hp-booster-default'] = cfg.defaultBooster;
+    t['hp-card-alert-value'] = cfg.cardAlertValue;
     t['hp-priority-target'] = cfg.priorityTarget;
     t['hp-booster-force'] = state.panelCfg.booster.mode === 'fixed' ? state.panelCfg.booster.setId : '';
     t['hp-booster-mode'] = state.panelCfg.booster.mode === 'optimal' ? 'optimal' : '';
@@ -215,7 +217,7 @@ async function startAccount(opts) {
           .map((x) => ({ text: x.textContent.trim(), error: x.classList.contains('hp-toast--error') }))
           .filter((x) => x.text && !window.__seen.has(x.text) && window.__seen.add(x.text));
       }).catch(() => []);
-      for (const x of t) logL(x.error ? 'error' : 'info', '›', x.text.replace(/\s+/g, ' ').slice(0, 300));
+      for (const x of t) logL(x.error ? 'error' : /^Carte de valeur/.test(x.text) ? 'warn' : 'info', '›', x.text.replace(/\s+/g, ' ').slice(0, 300));
     }, 10000);
 
     // Session toujours valide ? Sinon reconnexion puis rechargement des scripts

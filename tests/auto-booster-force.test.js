@@ -22,17 +22,18 @@ async function run(force, o = {}) {
   const store = { 'hp-auto-booster-on': '1' };
   if (force !== undefined) store['hp-booster-force'] = force;
   if (o.mode) store["hp-booster-mode"] = o.mode;
+  if (o.alert !== undefined) store['hp-card-alert-value'] = String(o.alert);
   const ctx = {
     console, Date, JSON, Math, Set, Map, Promise, Array, Object, String, Number, crypto: { randomUUID: () => 'uuid' },
     localStorage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); }, removeItem: (k) => { delete store[k]; } },
     UI: new Proxy({ esc: (s) => String(s ?? ''), toast: (m) => toasts.push(m) }, { get: (t, p) => (p in t ? t[p] : () => {}) }),
-    setInterval: () => 0, clearInterval: () => {}, setTimeout: (fn) => setTimeout(fn, 0),
+    setInterval: (fn, ms) => { if (ms === 1000) setTimeout(fn, 250); return 0; }, clearInterval: () => {}, setTimeout: (fn) => setTimeout(fn, 0),
     // Stub du kit (injecté dans le build, absent du source testé) : planificateur inerte, comme setInterval ci-dessus
     __hp: { jitter: (ms) => ms, schedule: () => ({ stop() {} }) },
     fetch: async (url, opts = {}) => {
       const p = url.replace(/^\/api/, '');
       const ok = (d) => ({ ok: true, status: 200, json: async () => d });
-      if (opts.method === 'POST' && p === '/packs/open') { opened.push(JSON.parse(opts.body).setId); return ok({ cards: [], packs: { stock: 0, max: 5 } }); }
+      if (opts.method === 'POST' && p === '/packs/open') { opened.push(JSON.parse(opts.body).setId); return ok({ cards: o.cards || [], packs: { stock: 0, max: 5 } }); }
       if (p === '/me') return ok({ me: { packs: { stock: 5, max: 5 } } });
       if (p === '/sets') return ok(sets);
       let m = p.match(/^\/sets\/([^/]+)\/booster$/);
@@ -85,4 +86,22 @@ test('optimisation : plus aucune nouvelle carte possible → retour au meilleur 
 test('optimisation : une série fixe garde la priorité', async () => {
   const r = await run('setA', { mode: 'optimal' });
   assert.deepStrictEqual(r.opened, ['setA']);
+});
+
+test('journal : carte nouvelle signalée, carte de valeur annoncée à part', async () => {
+  const det = () => ({ cards: [{ id: 'c1', rarity: 'C', copies: 0, marketValue: 250 }, { id: 'c2', rarity: 'C', copies: 2, marketValue: 3 }] });
+  const cards = [{ id: 'c1', name: 'Dracaufeu', reverse: false }, { id: 'c2', name: 'Rattata', reverse: false }, { id: 'c1', name: 'Dracaufeu', reverse: false }];
+  const r = await run('setA', { detail: det, cards });
+  const open = r.toasts.find((m) => /Booster ouvert/.test(m)) || '';
+  assert.match(open, /1 nouvelle carte/);
+  assert.match(open, /Dracaufeu <b>\(nouvelle\)<\/b>, Rattata, Dracaufeu(?! <b>)/, open); // le 2e exemplaire du même booster n'est plus « nouveau »
+  const val = r.toasts.filter((m) => /Carte de valeur/.test(m));
+  assert.strictEqual(val.length, 2, JSON.stringify(r.toasts));
+  assert.match(val[0], /Dracaufeu, 250 pièces \(nouvelle\)/);
+});
+
+test('journal : seuil à 0 → aucune alerte de valeur', async () => {
+  const det = () => ({ cards: [{ id: 'c1', rarity: 'C', copies: 0, marketValue: 250 }] });
+  const r = await run('setA', { detail: det, cards: [{ id: 'c1', name: 'Dracaufeu' }], alert: 0 });
+  assert.strictEqual(r.toasts.filter((m) => /Carte de valeur/.test(m)).length, 0);
 });

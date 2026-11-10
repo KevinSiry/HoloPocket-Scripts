@@ -23,6 +23,8 @@ function computeAlerts(bots, now = Date.now()) {
     const flipOn = s.scripts.find((x) => x.name === 'achat-revente' && x.on);
     if (flipOn && s.flip && s.flip.lastPassAt && now - Date.parse(s.flip.lastPassAt) > 5 * MIN) add(b, 'warn', 'flip-stalled', `Achat-revente actif mais aucun passage depuis ${Math.round((now - Date.parse(s.flip.lastPassAt)) / MIN)} min.`);
     if (flipOn && s.flip && s.flip.error) add(b, 'warn', 'flip-error', `Achat-revente : ${s.flip.error}`);
+    // Carte de valeur ouverte par l'auto-booster (une alerte par carte, pendant 1 h)
+    for (const l of (b.logs || [])) if (l.level === 'warn' && /Carte de valeur/.test(l.text) && now - Date.parse(l.at) < 60 * MIN) add(b, 'warn', `card-${l.id}`, l.text.replace(/^›\s*/, ''));
     const err = (b.logs || []).filter((l) => l.level === 'error' && now - Date.parse(l.at) < ERROR_WINDOW).pop();
     if (err) add(b, 'warn', 'script-error', `Erreur d’un script : ${err.text}`);
   }

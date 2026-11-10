@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Ouverture auto dès que l'énergie suffit
 // @namespace    kevin.holopocket
-// @version      2.7
+// @version      2.8
 // @description  Surveille l'énergie en arrière-plan. Dès qu'elle suffit (énergie bonus comprise), ouvre 1 booster de la série favorite qui a le plus de chance de donner une nouvelle carte (ou d'une série fixe, ou de la série la plus rentable en nouvelles cartes par point d'énergie, selon le réglage du panel).
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -79,7 +79,9 @@
     if (c && Date.now() - c.at < ttl) return c.row;
     const id = encodeURIComponent(s.id);
     const [booster, detail] = await Promise.all([api('GET', `/sets/${id}/booster`), api('GET', `/sets/${id}`)]);
-    const row = { id: s.id, name: s.name, cost: booster.cost ?? s.packCost ?? 1, chance: chanceNewCard(booster, detail.cards || []) };
+    // État de la collection avant ouverture : sert à dire quelles cartes obtenues sont nouvelles, et leur valeur
+    const owned = new Map((detail.cards || []).filter((c) => c && c.id != null).map((c) => [String(c.id), { copies: c.copies || 0, rev: c.reverseCopies || 0, value: c.marketValue ?? c.estimate ?? null, revValue: c.reverseMarketValue ?? c.reverseEstimate ?? null }]));
+    const row = { id: s.id, name: s.name, cost: booster.cost ?? s.packCost ?? 1, chance: chanceNewCard(booster, detail.cards || []), owned };
     chanceCache.set(s.id, { at: Date.now(), row });
     return row;
   }
@@ -139,6 +141,26 @@
   const usable = (p) => (p.stock || 0) + (CONFIG.KEEP_BONUS ? 0 : bonusOf(p));
   const state = { on: false, busy: false, opens: 0, lastCards: [], lastSet: null, nextCheck: 0, error: null };
 
+  // Complète chaque carte obtenue : nouvelle pour la collection ? quelle valeur ?
+  // Le site peut le dire lui-même (isNew / new) ; sinon on compare à la collection lue juste avant l'ouverture.
+  function describeCards(cards, owned) {
+    const got = new Map(); // exemplaires de la même carte tirés dans CE booster
+    return cards.map((c) => {
+      const id = String(c.cardId ?? (c.card && c.card.id) ?? c.id ?? '');
+      const rev = !!c.reverse;
+      const before = owned && owned.get(id);
+      const k = `${id}|${rev}`;
+      const seen = got.get(k) || 0; got.set(k, seen + 1);
+      const flag = typeof c.isNew === 'boolean' ? c.isNew : typeof c.new === 'boolean' ? c.new : null;
+      const isNew = flag != null ? flag : before ? (rev ? before.rev : before.copies) + seen === 0 : false;
+      const own = rev ? (c.reverseMarketValue ?? c.reverseEstimate) : (c.marketValue ?? c.estimate);
+      const value = Number(own ?? (c.card && (rev ? c.card.reverseMarketValue : c.card.marketValue)) ?? (before && (rev ? before.revValue : before.value)) ?? 0) || 0;
+      return { name: c.name ?? (c.card && c.card.name) ?? id, reverse: rev, isNew, value };
+    });
+  }
+  // Seuil d'alerte « carte de valeur » (localStorage 'hp-card-alert-value', 100 par défaut, 0 = aucune alerte)
+  const alertValue = () => { const v = readLS('hp-card-alert-value'); return v === '' ? 100 : Math.max(0, Number(v) || 0); };
+
   async function tick() {
     if (!state.on || state.busy) return;
     state.busy = true;
@@ -163,7 +185,7 @@
         chanceCache.delete(best.id); // la collection de cette série vient de changer
         state.opens++;
         state.lastSet = best;
-        state.lastCards = res.cards || [];
+        state.lastCards = describeCards(res.cards || [], best.owned);
         state.error = null;
         Object.assign(packs, res.packs || {}); // stock mis à jour par la réponse
         render(packs);
@@ -222,8 +244,14 @@
     // Nouvelle ouverture → notification avec les cartes obtenues
     if (state.opens > lastToastOpens && state.lastSet) {
       lastToastOpens = state.opens;
-      const cards = state.lastCards.map((c) => `${esc(c.name)}${c.reverse ? ' (rev.)' : ''}${c.isNew || c.new ? ' ✨' : ''}`).join(', ');
-      UI.toast(`<b>Booster ouvert</b> · ${esc(state.lastSet.name)}${cards ? `<br><span class="hp-muted">${cards}</span>` : ''}`, { kind: 'success', ms: 12000 });
+      const fresh = state.lastCards.filter((c) => c.isNew).length;
+      const cards = state.lastCards.map((c) => `${esc(c.name)}${c.reverse ? ' (rev.)' : ''}${c.isNew ? ' <b>(nouvelle)</b>' : ''}`).join(', ');
+      UI.toast(`<b>Booster ouvert</b> · ${esc(state.lastSet.name)} · ${fresh ? `${fresh} nouvelle${fresh > 1 ? 's' : ''} carte${fresh > 1 ? 's' : ''}` : 'aucune nouvelle carte'}${cards ? `<br><span class="hp-muted">${cards}</span>` : ''}`, { kind: 'success', ms: 12000 });
+      // Carte de valeur : un message à part, repris comme alerte par le panel
+      const min = alertValue();
+      if (min > 0) for (const c of state.lastCards.filter((x) => x.value >= min)) {
+        UI.toast(`<b>Carte de valeur</b> : ${esc(c.name)}${c.reverse ? ' (rev.)' : ''}, ${c.value} pièces${c.isNew ? ' (nouvelle)' : ''} · ${esc(state.lastSet.name)} · ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`, { kind: 'success', ms: 20000 });
+      }
     }
     if (state.error && state.error !== lastError) {
       lastError = state.error;

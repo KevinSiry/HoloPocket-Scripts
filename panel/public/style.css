@@ -224,3 +224,5 @@ body.login { display: grid; place-items: center; min-height: 100vh; padding: 1re
   .inline-form .form { left: 0; right: auto; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+#logList li.fresh { box-shadow: inset 3px 0 var(--gold); }
+#logList li.warn.fresh { box-shadow: inset 3px 0 var(--warn); }

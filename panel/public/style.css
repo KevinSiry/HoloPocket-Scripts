@@ -226,3 +226,25 @@ body.login { display: grid; place-items: center; min-height: 100vh; padding: 1re
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 #logList li.fresh { box-shadow: inset 3px 0 var(--gold); }
 #logList li.warn.fresh { box-shadow: inset 3px 0 var(--warn); }
+
+/* Journal : étiquette, résumé, puis détail lisible (cartes en pastilles, listes à puces) */
+#logList li { grid-template-columns: 4.6rem 7rem minmax(0, 1fr); align-items: start; padding: .6rem 1rem; }
+.log-body { min-width: 0; display: grid; gap: .4rem; }
+.log-head { margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: .3rem .5rem; line-height: 1.45; }
+.log-tag { font-weight: 650; color: var(--paper); }
+.log-tag::after { content: ""; display: inline-block; width: 1px; height: .85em; margin-left: .5rem; background: var(--edge); vertical-align: -1px; }
+.log-sum { color: var(--mist); overflow-wrap: anywhere; }
+#logList li.warn .log-sum, #logList li.error .log-sum, #logList li.fresh .log-sum { color: var(--paper); }
+.log-cards, .log-lines { list-style: none; margin: 0; padding: 0; }
+.log-cards { display: flex; flex-wrap: wrap; gap: .3rem; }
+#logList .log-cards li { display: inline-flex; border-top: 1px solid var(--edge); box-shadow: none; align-items: center; gap: .35rem; padding: .15rem .55rem; border: 1px solid var(--edge); border-radius: 999px; color: var(--mist); font-size: 12px; line-height: 1.5; }
+#logList .log-cards li.fresh { color: var(--paper); border-color: rgba(255, 214, 10, .6); background: rgba(255, 214, 10, .1); }
+.log-cards .new { color: var(--gold); font-weight: 650; }
+.log-cards .rev { color: var(--mist); font-size: 11px; border-left: 1px solid var(--edge); padding-left: .35rem; }
+.log-lines { display: grid; gap: .15rem; color: var(--mist); font-size: 12.5px; }
+#logList .log-lines li { display: block; padding: 0; border-top: 0; box-shadow: none; }
+.log-lines li::before { content: "–"; margin-right: .45rem; color: var(--edge); }
+@media (max-width: 720px) {
+  #logList li { grid-template-columns: 4.6rem minmax(0, 1fr); }
+  #logList li > .log-body { grid-column: 1 / -1; }
+}

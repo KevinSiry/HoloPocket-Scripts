@@ -405,13 +405,51 @@ function renderSummary(d) {
   cell(n > 1 ? 'alertes' : 'alerte', String(n), n > 0);
 }
 
+// Une ligne du journal → { tag, summary, details } : « Booster ouvert · Série · 2 nouvelles cartes » puis le détail sur les lignes suivantes
+function parseLog(text) {
+  let [first, ...rest] = String(text).replace(/^›\s*/, '').split('\n');
+  if (!rest.length) { // anciennes lignes, enregistrées sans retour à la ligne : on retrouve la coupure
+    const m = first.match(/^(Booster ouvert .*?nouvelles? cartes?)(\S.*)$/) || first.match(/^([^•]+?)\s*(•.*)$/);
+    if (m) { first = m[1]; rest = m[2].split(/\s*•\s*/).filter(Boolean); }
+  }
+  const m = first.match(/^([^:·]{2,28}?)\s*[:·]\s+(.+)$/);
+  return { tag: m ? m[1].trim() : '', summary: m ? m[2].trim() : first.trim(), details: rest.map((x) => x.trim()).filter(Boolean) };
+}
+function logBody(l) {
+  const { tag, summary, details } = parseLog(l.text);
+  const body = el('div', 'log-body');
+  const head = el('p', 'log-head');
+  if (tag) head.append(el('span', 'log-tag', tag));
+  const lvl = l.level === 'error' ? 'Erreur' : l.level === 'warn' ? 'Alerte' : '';
+  if (lvl) head.append(el('span', 'lvl', lvl));
+  head.append(el('span', 'log-sum', summary));
+  body.append(head);
+  if (!details.length) return body;
+  if (tag === 'Booster ouvert') { // cartes obtenues : une pastille par carte, les nouvelles en tête et en doré
+    const cards = details.join(', ').split(/,\s+/).map((c) => c.trim()).filter(Boolean).map((c) => ({ fresh: /\(nouvelle\)/.test(c), rev: /\(rev\.\)/.test(c), name: c.replace(/\s*\((nouvelle|rev\.)\)/g, '') }));
+    const ul = el('ul', 'log-cards');
+    for (const c of cards.sort((a, b) => (b.fresh ? 1 : 0) - (a.fresh ? 1 : 0))) {
+      const li = el('li', c.fresh ? 'fresh' : null, c.name);
+      if (c.rev) li.append(el('span', 'rev', 'reverse'));
+      if (c.fresh) li.append(el('span', 'new', 'nouvelle'));
+      ul.append(li);
+    }
+    body.append(ul);
+  } else {
+    const ul = el('ul', 'log-lines');
+    for (const d of details) ul.append(el('li', null, d.replace(/^[•✗]\s*/, '')));
+    body.append(ul);
+  }
+  return body;
+}
 function renderLogs(lines) {
   const ol = $('logList');
   ol.replaceChildren();
   for (const l of lines.slice().reverse()) {
     const li = el('li', /\(nouvelle\)/.test(l.text) ? `${l.level} fresh` : l.level); // booster avec une nouvelle carte : repère doré
-    const lvl = l.level === 'error' ? 'Erreur' : l.level === 'warn' ? 'Alerte' : '';
-    li.append(el('time', 'muted', new Date(l.at).toLocaleTimeString('fr-FR')), el('b', null, l.bot), ...(lvl ? [el('span', 'lvl', lvl)] : []), el('span', null, l.text));
+    const t = el('time', 'muted', new Date(l.at).toLocaleTimeString('fr-FR'));
+    t.dateTime = l.at; t.title = new Date(l.at).toLocaleString('fr-FR');
+    li.append(t, el('b', null, l.bot), logBody(l));
     ol.append(li);
   }
   if (!lines.length) ol.append(el('li', 'muted', 'Aucune ligne.'));

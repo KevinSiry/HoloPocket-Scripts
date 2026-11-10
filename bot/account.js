@@ -214,10 +214,11 @@ async function startAccount(opts) {
       const t = await page.evaluate(() => {
         window.__seen = window.__seen || new Set();
         return [...document.querySelectorAll('.hp-toast')]
-          .map((x) => ({ text: x.textContent.trim(), error: x.classList.contains('hp-toast--error') }))
+          // innerText garde les retours à la ligne du message (titre, puis détail) ; textContent les collait
+          .map((x) => ({ text: (x.innerText || x.textContent || '').trim(), error: x.classList.contains('hp-toast--error') }))
           .filter((x) => x.text && !window.__seen.has(x.text) && window.__seen.add(x.text));
       }).catch(() => []);
-      for (const x of t) logL(x.error ? 'error' : /^Carte de valeur/.test(x.text) ? 'warn' : 'info', '›', x.text.replace(/\s+/g, ' ').slice(0, 300));
+      for (const x of t) logL(x.error ? 'error' : /^Carte de valeur/.test(x.text) ? 'warn' : 'info', '›', x.text.split(/\n+/).map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n').slice(0, 480));
     }, 10000);
 
     // Session toujours valide ? Sinon reconnexion puis rechargement des scripts

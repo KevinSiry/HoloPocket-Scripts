@@ -13,6 +13,7 @@
   <nav role="tablist" aria-label="Sections">
     <button data-tab="accounts" class="tab on" role="tab" aria-selected="true" id="tab-accounts" aria-controls="accounts">Comptes</button>
     <button data-tab="logs" class="tab" role="tab" aria-selected="false" id="tab-logs" aria-controls="logs">Journal</button>
+    <button data-tab="chances" class="tab" role="tab" aria-selected="false" id="tab-chances" aria-controls="chances">Chances</button>
   </nav>
   <span id="stamp" class="muted" role="status"></span>
   <button id="logout" class="ghost">Déconnexion</button>
@@ -28,6 +29,20 @@
       <label><input type="checkbox" id="logWarn"> Alertes seulement</label>
     </div>
     <ol id="logList"></ol>
+  </section>
+  <section id="chances" role="tabpanel" aria-labelledby="tab-chances" hidden>
+    <div class="bar">
+      <select id="chBot" aria-label="Compte"></select>
+      <select id="chSort" aria-label="Tri">
+        <option value="ratio">Meilleure chance par énergie</option>
+        <option value="chance">Meilleure chance par booster</option>
+        <option value="name">Nom de la série</option>
+      </select>
+      <button id="chRefresh" class="ghost small" type="button">Recalculer</button>
+      <span id="chStamp" class="muted" role="status"></span>
+    </div>
+    <p class="muted ch-help">Chance d’obtenir au moins une nouvelle carte en ouvrant un booster de la série, d’après la collection du compte. Une reverse manquante compte comme une nouvelle carte.</p>
+    <div id="chList"></div>
   </section>
 </main>
 <dialog id="dlg"><form method="dialog" id="dlgForm"><h2 id="dlgTitle"></h2><p id="dlgText"></p><output id="dlgSecret" hidden></output><div class="actions" id="dlgActions"></div></form></dialog>

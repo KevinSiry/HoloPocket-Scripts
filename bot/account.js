@@ -243,7 +243,7 @@ async function startAccount(opts) {
 
     return {
       name: a.user, cfg, logs,
-      status: glue.status, sets: glue.sets, applyConfig: glue.applyConfig,
+      status: glue.status, sets: glue.sets, chances: glue.chances, applyConfig: glue.applyConfig,
       // La liste des comptes a changé : réécrit les exclusions et recharge la page seulement si elles ont bougé
       async refreshAccounts(accounts) {
         const before = JSON.stringify(cfg.exclude) + cfg.priorityTarget;

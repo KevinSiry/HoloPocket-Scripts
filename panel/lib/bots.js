@@ -57,6 +57,7 @@ function createBots({ bots, token, fetchFn = fetch, timeoutMs = 3000, now = Date
     },
     get: (name) => known.get(name),
     sets: (name) => call(find(name), 'GET', '/sets'),
+    chances: (name, fresh) => call(find(name), 'GET', `/chances${fresh ? '?fresh=1' : ''}`),
     config: (name, patch) => call(find(name), 'PUT', '/config', patch),
     restart: (name) => call(find(name), 'POST', '/restart'),
   };

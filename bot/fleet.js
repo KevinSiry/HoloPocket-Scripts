@@ -30,7 +30,7 @@ function createFleet(o) {
         });
         if (e.removed) { await handle.stop(); return; }
         e.handle = handle; e.state = 'running'; e.wait = MIN_WAIT; e.failedBefore = false; e.nextTryAt = 0;
-        e.api = createPanelHandler({ token, logs: e.logs, status: handle.status, sets: handle.sets, applyConfig: handle.applyConfig, restart: () => restart(e.username) });
+        e.api = createPanelHandler({ token, logs: e.logs, status: handle.status, sets: handle.sets, chances: handle.chances, applyConfig: handle.applyConfig, restart: () => restart(e.username) });
       } catch (err) { fail(e, err.message, err.retryAfterMs); }
     });
     startChain = run.catch(() => {});

@@ -248,3 +248,35 @@ body.login { display: grid; place-items: center; min-height: 100vh; padding: 1re
   #logList li { grid-template-columns: 4.6rem minmax(0, 1fr); }
   #logList li > .log-body { grid-column: 1 / -1; }
 }
+
+/* Onglet Chances */
+.ch-help { max-width: 70ch; margin: 0 0 .75rem; }
+.ch-table { width: 100%; border-collapse: collapse; background: var(--sleeve); border: 1px solid var(--edge); border-radius: var(--r-lg); overflow: hidden; margin-bottom: 2rem; font-size: 14px; }
+.ch-table th, .ch-table td { padding: .6rem 1rem; text-align: left; vertical-align: middle; }
+.ch-table thead th { color: var(--mist); font-size: 12px; font-weight: 650; border-bottom: 1px solid var(--edge); white-space: nowrap; }
+.ch-table tbody tr + tr > * { border-top: 1px solid var(--edge); }
+.ch-table .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ch-name { font-weight: 600; }
+.ch-name > span:first-child { margin-right: .4rem; }
+.ch-best { margin-left: .5rem; padding: .05rem .5rem; border-radius: 999px; background: rgba(255, 214, 10, .12); border: 1px solid rgba(255, 214, 10, .55); color: var(--gold); font-size: 12px; font-weight: 650; white-space: nowrap; }
+.ch-table .ch-bar { display: grid; grid-template-columns: 5.5rem minmax(4rem, 1fr); align-items: center; gap: .75rem; }
+.ch-table .ch-bar b { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ch-table .track { height: 8px; border-radius: 4px; background: var(--binder); overflow: hidden; }
+.ch-table .track i { display: block; height: 100%; width: calc(var(--p, 0) * 100%); background: var(--mist); border-radius: inherit; }
+.ch-table tr.best .track i { background: var(--gold); }
+.ch-table tr.best { box-shadow: inset 3px 0 var(--gold); }
+.ch-table tr.done { color: var(--mist); }
+.ch-table tr.done .ch-bar { grid-template-columns: 1fr; }
+.ch-table tr.done .ch-bar b { font-weight: 500; }
+.ch-table tr.done .track { display: none; }
+@media (max-width: 720px) {
+  .ch-table thead { display: none; }
+  .ch-table, .ch-table tbody { display: block; }
+  .ch-table tr { display: grid; grid-template-columns: 1fr auto; gap: .2rem .75rem; padding: .7rem 1rem; }
+  .ch-table tr + tr { border-top: 1px solid var(--edge); }
+  .ch-table th, .ch-table td { padding: 0; border: 0 !important; }
+  .ch-table .ch-name, .ch-table td.wide { grid-column: 1 / -1; }
+  .ch-table td.num { text-align: left; color: var(--mist); font-size: 12.5px; }
+  .ch-table td.num:last-child { grid-column: 1 / -1; }
+  .ch-table td.num::before { content: attr(data-label) " : "; }
+}

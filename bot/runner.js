@@ -53,7 +53,7 @@ async function runSingle() {
   if (env.PANEL_TOKEN) {
     const port = +(env.HP_PANEL_PORT || 3100);
     createPanelServer({
-      token: env.PANEL_TOKEN, logs, status: handle.status, sets: handle.sets, applyConfig: handle.applyConfig,
+      token: env.PANEL_TOKEN, logs, status: handle.status, sets: handle.sets, chances: handle.chances, applyConfig: handle.applyConfig,
       restart: () => { logL('info', 'Redémarrage demandé depuis le panel'); process.exit(0); },
     }).listen(port, '0.0.0.0', () => logL('info', `API du panel à l’écoute sur le port ${port}`));
   }

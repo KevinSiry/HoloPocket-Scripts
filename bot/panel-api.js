@@ -63,6 +63,8 @@ function createPanelHandler(deps) {
 
       if (route === 'GET /sets') return send(res, 200, await deps.sets());
 
+      if (route === 'GET /chances') return send(res, 200, deps.chances ? await deps.chances(url.searchParams.get('fresh') === '1') : { computing: false, at: null, rows: [], error: 'non disponible sur ce bot' });
+
       if (route === 'PUT /config') {
         let patch;
         try { patch = JSON.parse(await readBody(req)); } catch (e) {

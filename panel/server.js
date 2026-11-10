@@ -182,12 +182,13 @@ function createApp(opts) {
         const failed = isGlobal ? Object.keys(errs) : (errs[name] ? [name] : []);
         return send(res, 200, { ok: true, failed: failed.map((n) => ({ name: n, error: errs[n] })) });
       }
-      const m = /^\/api\/bots\/([^/]+)\/(sets|config|restart)$/.exec(p);
+      const m = /^\/api\/bots\/([^/]+)\/(sets|chances|config|restart)$/.exec(p);
       if (m) {
         const name = decodeURIComponent(m[1]);
         if (!bots.has(name)) return send(res, 404, { error: 'compte inconnu' });
         try {
           if (req.method === 'GET' && m[2] === 'sets') return send(res, 200, await bots.sets(name));
+          if (req.method === 'GET' && m[2] === 'chances') return send(res, 200, await bots.chances(name, url.searchParams.get('fresh') === '1'));
           if (req.method === 'PUT' && m[2] === 'config') {
             let patch; try { patch = JSON.parse(await readBody(req)); } catch (e) { if (e.status) throw e; return send(res, 400, { error: 'JSON invalide' }); }
             if (patch && patch.booster) return send(res, 400, { error: 'le booster se règle via le réglage global ou le choix du compte' });

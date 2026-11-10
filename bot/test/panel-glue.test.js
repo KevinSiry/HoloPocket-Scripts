@@ -45,6 +45,7 @@ function setup(over = {}) {
       evaluate: async (fn, arg) => {
         if (arg !== undefined) { rec.liveSets.push(arg); return undefined; }
         if (world.pageDown) throw new Error('page fermée');
+        if (fn.name === 'readChances') { rec.chanceRuns = (rec.chanceRuns || 0) + 1; if (world.chancesFail) throw new Error('site muet'); return world.chances || []; }
         return fn.name === 'readSets' ? world.site.sets : world.site;
       },
     },
@@ -174,4 +175,33 @@ test('modifications en série : deux demandes simultanées ne se chevauchent pas
   ]);
   assert.deepStrictEqual(pc.readConfig(s.file), { booster: { mode: 'fixed', setId: 'me05' }, scripts: { echanges: false, recyclage: true } });
   assert.deepStrictEqual(s.cfg.scripts, ['holopocket-auto-booster.user.js', 'holopocket-recyclage.user.js']);
+});
+
+test('chances : calcul en arrière-plan, réponse immédiate, gardé 30 min, recalcul à la demande', async () => {
+  const s = setup({ world: { chances: [{ id: 'a', name: 'Alpha', cost: 1, chance: 0.4 }] } });
+  const first = s.glue.chances(false);
+  assert.strictEqual(first.computing, true);
+  assert.deepStrictEqual(first.rows, []);
+  await new Promise((r) => setTimeout(r, 5));
+  const done = s.glue.chances(false);
+  assert.strictEqual(done.computing, false);
+  assert.strictEqual(done.rows[0].chance, 0.4);
+  s.glue.chances(false);
+  assert.strictEqual(s.rec.chanceRuns, 1, 'pas de recalcul tant que le résultat est frais');
+  s.tick(31 * 60_000);
+  assert.strictEqual(s.glue.chances(false).computing, true, 'périmé : recalcul');
+  await new Promise((r) => setTimeout(r, 5));
+  assert.strictEqual(s.glue.chances(true).computing, true, 'recalcul forcé');
+  await new Promise((r) => setTimeout(r, 5));
+  assert.strictEqual(s.rec.chanceRuns, 3);
+});
+
+test('chances : échec signalé, pas de nouvel essai avant 1 min', async () => {
+  const s = setup({ world: { chancesFail: true } });
+  s.glue.chances(false);
+  await new Promise((r) => setTimeout(r, 5));
+  const r = s.glue.chances(false);
+  assert.strictEqual(r.computing, false);
+  assert.match(r.error, /site muet/);
+  assert.strictEqual(s.rec.chanceRuns, 1);
 });

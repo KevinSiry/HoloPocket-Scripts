@@ -455,6 +455,53 @@ function renderLogs(lines) {
   if (!lines.length) ol.append(el('li', 'muted', 'Aucune ligne.'));
 }
 
+// ───────── Onglet Chances : probabilité de nouvelle carte par booster, pour un compte ─────────
+const pct = (x) => (x >= 0.9995 ? '100 %' : x > 0 && x < 0.001 ? '< 0,1 %' : `${(x * 100).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} %`);
+let chTimer = null;
+function renderChances(d) {
+  const box = $('chList');
+  const sort = $('chSort').value;
+  const rows = d.rows.filter((r) => !r.error).map((r) => ({ ...r, ratio: r.cost > 0 ? r.chance / r.cost : 0 }));
+  const failed = d.rows.filter((r) => r.error);
+  rows.sort(sort === 'name' ? (a, b) => a.name.localeCompare(b.name, 'fr') : sort === 'chance' ? (a, b) => b.chance - a.chance || a.cost - b.cost : (a, b) => b.ratio - a.ratio || b.chance - a.chance);
+  const best = rows.reduce((m, r) => (r.ratio > (m ? m.ratio : 0) ? r : m), null);
+  $('chStamp').textContent = d.computing ? (rows.length ? 'Recalcul en cours…' : 'Calcul en cours, quelques secondes…') : d.error && !rows.length ? `Calcul impossible : ${d.error}` : d.at ? `Calculé ${ago(d.at)}` : '';
+  box.replaceChildren();
+  if (!rows.length) { if (!d.computing) box.append(el('p', 'empty', d.error ? 'Le calcul a échoué. Réessaie avec Recalculer.' : 'Aucune série à afficher.')); return; }
+  const table = el('table', 'ch-table');
+  const head = el('tr');
+  for (const [t, cls] of [['Série', ''], ['Chance de nouvelle carte', 'wide'], ['Coût', 'num'], ['Par énergie', 'num'], ['Cartes manquantes', 'num']]) { const th = el('th', cls, t); th.scope = 'col'; head.append(th); }
+  const thead = el('thead'); thead.append(head);
+  const tbody = el('tbody');
+  for (const r of rows) {
+    const tr = el('tr', r.chance <= 0 ? 'done' : r === best ? 'best' : null);
+    const name = el('th', 'ch-name'); name.scope = 'row';
+    name.append(el('span', null, r.name));
+    if (r.favorite) { const st = el('span', 'opt-star', '★'); st.title = 'Série favorite'; st.setAttribute('aria-label', 'favorite'); name.append(st); }
+    if (r === best) name.append(el('span', 'ch-best', 'Le plus rentable'));
+    const cell = el('td', 'wide');
+    const bar = el('span', 'track'); const fill = el('i'); fill.style.setProperty('--p', String(Math.max(0, Math.min(1, r.chance)))); bar.append(fill);
+    const wrap = el('div', 'ch-bar'); wrap.append(el('b', null, r.chance <= 0 ? 'Série complète' : pct(r.chance)), bar); cell.append(wrap);
+    tr.append(name, cell, el('td', 'num', `${num(r.cost)} énergie${r.cost > 1 ? 's' : ''}`), el('td', 'num', r.chance <= 0 ? '–' : pct(r.ratio)), el('td', 'num', `${num(r.missing)} sur ${num(r.total)}`));
+    ['Coût', 'Par énergie', 'Manquantes'].forEach((t, i) => { tr.querySelectorAll('td.num')[i].dataset.label = t; }); // libellés repris en affichage téléphone
+    tbody.append(tr);
+  }
+  table.append(thead, tbody);
+  box.append(table);
+  if (failed.length) box.append(el('p', 'muted', `Séries illisibles : ${failed.map((r) => r.name).join(', ')}.`));
+}
+async function refreshChances(fresh) {
+  clearTimeout(chTimer);
+  const name = $('chBot').value;
+  if (!name || $('chances').hidden) return;
+  try {
+    const d = await api('GET', `/api/bots/${encodeURIComponent(name)}/chances${fresh ? '?fresh=1' : ''}`);
+    if ($('chBot').value !== name) return; // compte changé entre-temps
+    renderChances(d);
+    if (d.computing) chTimer = setTimeout(() => refreshChances(false), 3000);
+  } catch (e) { $('chStamp').textContent = `Erreur : ${e.message}`; $('chList').replaceChildren(); }
+}
+
 async function refresh(force) {
   if (busy && !force) return;
   try {
@@ -472,6 +519,13 @@ async function refresh(force) {
     if (!busy && !typing && !document.querySelector('.combo.open')) {
       $('toolbar').replaceChildren(globalBar(d.booster.global, d.bots), ...(manage ? [addBar()] : []));
       $('accounts').replaceChildren(...(resolved.length ? resolved : [el('p', 'empty', manage ? 'Aucun compte pour le moment. Crée-en un ou ajoute un compte existant avec les boutons ci-dessus.' : 'Aucun bot détecté.')]));
+    }
+    // Comptes en ligne proposés dans l'onglet Chances (sélection gardée)
+    const chSel = $('chBot'), online = d.bots.filter((b) => b.online).map((b) => b.name);
+    if ([...chSel.options].map((o) => o.value).join('|') !== online.join('|')) {
+      const keep = chSel.value;
+      chSel.replaceChildren(...online.map((n) => { const o = el('option', null, n); o.value = n; return o; }));
+      if (online.includes(keep)) chSel.value = keep; else if (!$('chances').hidden) refreshChances(false);
     }
     const sel = $('logBot');
     if (sel.options.length === 1) for (const b of d.bots) { const o = el('option', null, b.name); o.value = b.name; sel.append(o); }
@@ -492,9 +546,14 @@ for (const b of document.querySelectorAll('.tab')) b.addEventListener('click', (
   $('toolbar').hidden = b.dataset.tab !== 'accounts';
   $('summary').hidden = b.dataset.tab !== 'accounts';
   $('logs').hidden = b.dataset.tab !== 'logs';
+  $('chances').hidden = b.dataset.tab !== 'chances';
+  if (b.dataset.tab === 'chances') refreshChances(false);
   refresh(true);
 });
 $('logBot').addEventListener('change', refreshLogs);
+$('chBot').addEventListener('change', () => { $('chList').replaceChildren(); refreshChances(false); });
+$('chSort').addEventListener('change', () => refreshChances(false));
+$('chRefresh').addEventListener('click', () => refreshChances(true));
 $('logWarn').addEventListener('change', refreshLogs);
 $('logout').addEventListener('click', async () => { await api('POST', '/api/logout').catch(() => {}); location.href = '/login'; });
 refresh(true);

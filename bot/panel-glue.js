@@ -32,6 +32,46 @@ function readSiteState() {
   return Promise.all([j('/me'), j('/trades/sent'), j('/market/counts'), cached ? window.__hpSets.v : j('/sets')])
     .then(([me, sent, counts, sets]) => { if (!cached && sets) window.__hpSets = { at: Date.now(), v: sets }; return ({ me, sent, counts, sets, flip: ls('hp-flip-state'), beat: ls('hp-flip-beat') }); });
 }
+// Exécuté DANS la page : chance d'obtenir au moins une nouvelle carte en ouvrant un booster de chaque série (hors promos).
+// Même calcul que le script d'ouverture auto (une reverse manquante compte comme une nouvelle carte). Séries lues une par une.
+async function readChances() {
+  const j = async (p) => { const r = await fetch('/api' + p, { credentials: 'same-origin' }); if (!r.ok) throw new Error(`${p} : HTTP ${r.status}`); return r.json(); };
+  const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+  const chance = (booster, cards) => {
+    const byR = {};
+    for (const c of cards) {
+      const r = (byR[c.rarity] ??= { n: 0, miss: 0, rev: 0, revMiss: 0 });
+      r.n++;
+      if (!c.copies) r.miss++;
+      if (c.hasReverse) { r.rev++; if (!c.reverseCopies) r.revMiss++; }
+    }
+    let none = 1;
+    for (const slot of booster.slots || []) {
+      const reverseSlot = /reverse/i.test(slot.label || '');
+      let p = 0;
+      for (const pool of slot.pools || []) {
+        const r = byR[pool.rarity];
+        if (!r) continue;
+        if (reverseSlot && r.rev > 0) p += pool.chance * (r.revMiss / r.rev);
+        else p += pool.chance * (r.miss / r.n);
+      }
+      none *= 1 - Math.min(1, p);
+    }
+    return 1 - none;
+  };
+  const all = await j('/sets');
+  const rows = [];
+  for (const s of (Array.isArray(all) ? all : []).filter((x) => !x.promo)) {
+    try {
+      const id = encodeURIComponent(s.id);
+      const [booster, detail] = await Promise.all([j(`/sets/${id}/booster`), j(`/sets/${id}`)]);
+      const cards = detail.cards || [];
+      rows.push({ id: s.id, name: s.name, favorite: !!s.favorite, cost: booster.cost ?? s.packCost ?? 1, chance: chance(booster, cards), missing: cards.filter((c) => !c.copies).length, total: cards.length });
+    } catch (e) { rows.push({ id: s.id, name: s.name, favorite: !!s.favorite, error: String(e.message || e) }); }
+    await pause(150);
+  }
+  return rows;
+}
 function readSets() {
   return fetch('/api/sets', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : []));
 }
@@ -100,6 +140,20 @@ function createGlue(deps) {
     return v;
   }
 
+  // Chances par booster : calcul long (2 lectures par série), donc lancé en arrière-plan et gardé 30 min.
+  // La réponse est immédiate : { computing, at, rows } ; le panel redemande tant que computing est vrai.
+  let ch = { at: 0, rows: null, busy: false, error: null, failedAt: 0 };
+  function chances(fresh) {
+    const stale = !ch.rows || now() - ch.at > 30 * 60000;
+    if (!ch.busy && (fresh || (stale && now() - ch.failedAt > 60000))) {
+      ch.busy = true;
+      page.evaluate(readChances)
+        .then((rows) => { ch = { at: now(), rows, busy: false, error: null, failedAt: 0 }; })
+        .catch((e) => { ch = { ...ch, busy: false, error: String(e.message || e).split('\n')[0].slice(0, 200), failedAt: now() }; });
+    }
+    return { computing: ch.busy, at: ch.at ? new Date(ch.at).toISOString() : null, rows: ch.rows || [], error: ch.error };
+  }
+
   async function sets() {
     if (setsCache.v && now() - setsCache.at < 60000) return setsCache.v;
     const all = arr(await page.evaluate(readSets));
@@ -149,7 +203,7 @@ function createGlue(deps) {
     });
   }
 
-  return { status, sets, applyConfig, refreshToggles, logs: deps.logs };
+  return { status, sets, chances, applyConfig, refreshToggles, logs: deps.logs };
 }
 
 module.exports = { createGlue, TRADES_MAX };

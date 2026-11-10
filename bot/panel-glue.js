@@ -42,7 +42,7 @@ async function readChances() {
     for (const c of cards) {
       const r = (byR[c.rarity] ??= { n: 0, miss: 0, rev: 0, revMiss: 0 });
       r.n++;
-      if (!c.copies) r.miss++;
+      if ((c.copies || 0) - (c.reverseCopies || 0) <= 0) r.miss++; // « copies » compte aussi les reverses
       if (c.hasReverse) { r.rev++; if (!c.reverseCopies) r.revMiss++; }
     }
     let none = 1;
@@ -66,7 +66,7 @@ async function readChances() {
       const id = encodeURIComponent(s.id);
       const [booster, detail] = await Promise.all([j(`/sets/${id}/booster`), j(`/sets/${id}`)]);
       const cards = detail.cards || [];
-      rows.push({ id: s.id, name: s.name, favorite: !!s.favorite, cost: booster.cost ?? s.packCost ?? 1, chance: chance(booster, cards), missing: cards.filter((c) => !c.copies).length, total: cards.length });
+      rows.push({ id: s.id, name: s.name, favorite: !!s.favorite, cost: booster.cost ?? s.packCost ?? 1, chance: chance(booster, cards), missing: cards.filter((c) => (c.copies || 0) - (c.reverseCopies || 0) <= 0).length, total: cards.length });
     } catch (e) { rows.push({ id: s.id, name: s.name, favorite: !!s.favorite, error: String(e.message || e) }); }
     await pause(150);
   }

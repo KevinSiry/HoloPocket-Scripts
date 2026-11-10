@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Ouverture auto dès que l'énergie suffit
 // @namespace    kevin.holopocket
-// @version      2.8
+// @version      2.9
 // @description  Surveille l'énergie en arrière-plan. Dès qu'elle suffit (énergie bonus comprise), ouvre 1 booster de la série favorite qui a le plus de chance de donner une nouvelle carte (ou d'une série fixe, ou de la série la plus rentable en nouvelles cartes par point d'énergie, selon le réglage du panel).
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -42,7 +42,7 @@
     for (const c of cards) {
       const r = (byR[c.rarity] ??= { n: 0, miss: 0, rev: 0, revMiss: 0 });
       r.n++;
-      if (!c.copies) r.miss++;
+      if ((c.copies || 0) - (c.reverseCopies || 0) <= 0) r.miss++; // « copies » compte aussi les reverses : la version normale manque si on n'a que des reverses
       if (c.hasReverse) { r.rev++; if (!c.reverseCopies) r.revMiss++; }
     }
     let none = 1;
@@ -80,7 +80,7 @@
     const id = encodeURIComponent(s.id);
     const [booster, detail] = await Promise.all([api('GET', `/sets/${id}/booster`), api('GET', `/sets/${id}`)]);
     // État de la collection avant ouverture : sert à dire quelles cartes obtenues sont nouvelles, et leur valeur
-    const owned = new Map((detail.cards || []).filter((c) => c && c.id != null).map((c) => [String(c.id), { copies: c.copies || 0, rev: c.reverseCopies || 0, value: c.marketValue ?? c.estimate ?? null, revValue: c.reverseMarketValue ?? c.reverseEstimate ?? null }]));
+    const owned = new Map((detail.cards || []).filter((c) => c && c.id != null).map((c) => [String(c.id), { copies: Math.max(0, (c.copies || 0) - (c.reverseCopies || 0)), rev: c.reverseCopies || 0, value: c.marketValue ?? c.estimate ?? null, revValue: c.reverseMarketValue ?? c.reverseEstimate ?? null }]));
     const row = { id: s.id, name: s.name, cost: booster.cost ?? s.packCost ?? 1, chance: chanceNewCard(booster, detail.cards || []), owned };
     chanceCache.set(s.id, { at: Date.now(), row });
     return row;

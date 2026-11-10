@@ -13,7 +13,7 @@ Chaque script contient `@updateURL` : Tampermonkey récupère tout seul les nouv
 | Achat-revente intelligent | 1.12 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-revente.user.js) |
 | Achat des cartes manquantes bradées (auto, 70 % du prix moyen) | 1.8 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-achat-manquantes.user.js) |
 | Enchérir sur mes cartes manquantes | 2.2 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-acheter-manquantes.user.js) |
-| Ouverture auto dès que l’énergie suffit | 2.8 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-auto-booster.user.js) |
+| Ouverture auto dès que l’énergie suffit | 2.9 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-auto-booster.user.js) |
 | Assistant Cartodle | 2.0 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-cartodle.user.js) |
 | Chances de nouvelles cartes par booster | 2.0 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-chances-boosters.user.js) |
 | Assistant Coffre | 2.0 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-coffre.user.js) |

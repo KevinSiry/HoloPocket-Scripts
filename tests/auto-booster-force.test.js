@@ -105,3 +105,10 @@ test('journal : seuil à 0 → aucune alerte de valeur', async () => {
   const r = await run('setA', { detail: det, cards: [{ id: 'c1', name: 'Dracaufeu' }], alert: 0 });
   assert.strictEqual(r.toasts.filter((m) => /Carte de valeur/.test(m)).length, 0);
 });
+
+test('une carte possédée seulement en reverse compte comme manquante en version normale', async () => {
+  // A : la seule carte n'existe chez moi qu'en reverse → la version normale manque → A passe devant B (complète)
+  const det = (id) => ({ cards: [id === 'setA' ? { id: 'x', rarity: 'C', copies: 1, reverseCopies: 1 } : { id: 'y', rarity: 'C', copies: 1, reverseCopies: 0 }] });
+  const r = await run(undefined, { mode: 'optimal', detail: det });
+  assert.deepStrictEqual(r.opened, ['setA']);
+});

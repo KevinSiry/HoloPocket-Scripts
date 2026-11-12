@@ -18,7 +18,7 @@ Chaque script contient `@updateURL` : Tampermonkey récupère tout seul les nouv
 | Chances de nouvelles cartes par booster | 2.0 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-chances-boosters.user.js) |
 | Assistant Coffre | 2.0 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-coffre.user.js) |
 | Assistant Connexions | 2.0 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-connexions.user.js) |
-| Échanges équitables | 3.20 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js) |
+| Échanges équitables | 3.21 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js) |
 | Stratège du Conseil 4 (Ligue : meilleur booster / Super Bonbon, mode auto) | 1.2 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-ligue.user.js) |
 | Stratège du Maître (Ligue : meilleure annonce à chaque booster, mode auto) | 1.1 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-maitre.user.js) |
 | Recyclage intelligent des doublons | 1.3 | [Installer](https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-recyclage.user.js) |

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.20
-// @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord, avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, et des pièces du compte une fois par heure, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
+// @version      3.21
+// @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord (complétés par des paires de valeur équivalente quand il y en a peu), avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, et des pièces du compte une fois par heure, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
 // @match        https://holopocket.fr/*
 // @grant        none
 // @run-at       document-idle
@@ -21,6 +21,9 @@
     TOL_ABS: 2,          // …ou 2 pièces, le plus large des deux (utile pour les petites cartes)
     SAME_RARITY: true,   // exige le même niveau de rareté des deux côtés de chaque paire
     SAME_VERSION: true,  // et la même version : reverse contre reverse, normale contre normale
+    CROSS_VALUE: true,       // peu de paires de même rareté avec un joueur : on complète par des paires de valeur équivalente, rareté ou version différente
+    CROSS_WHEN_BELOW: 2,     // …seulement s'il y a moins de 2 paires de même rareté avec ce joueur
+    CROSS_MAX_RANK_GAP: 2,   // …et au plus 2 niveaux de rareté d'écart entre les deux cartes
     // Anti-spam, par joueur ciblé
     PLAYER_COOLDOWN_H: 24,   // une seule proposition par joueur toutes les 24 h
     DECLINED_COOLDOWN_H: 72, // 3 jours si le joueur a refusé ta dernière proposition
@@ -456,10 +459,17 @@
       //  - même rareté et même version, toujours
       //  - valeurs proches → paire équitable
       //  - ta carte vaut plus (jusqu'à 2×) → paire « compensée » : il ajoute des pièces. Jamais l'inverse.
-      const score = (g, a) => {
+      //  - cross = true (paires de complément) : rareté ou version libres, mais valeurs proches obligatoires, sans pièces
+      const score = (g, a, cross = false) => {
+        const vg = val(g), va = val(a), tol = tolOf(Math.max(vg, va));
+        if (cross) {
+          const gap = Math.abs((g.rank || 0) - (a.rank || 0));
+          if (!(vg > 0 && va > 0) || gap > CONFIG.CROSS_MAX_RANK_GAP || Math.abs(vg - va) > tol) return null;
+          // valeur la plus proche d'abord, puis le plus petit écart de rareté, puis la même version
+          return { d: Math.abs(vg - va) + gap * 0.5 + (!!g.reverse === !!a.reverse ? 0 : 0.25) - (c.wish && c.wish.has(key(g)) ? 0.25 : 0), coin: false, cross: true };
+        }
         if (CONFIG.SAME_RARITY && g.rank !== a.rank) return null;
         if (CONFIG.SAME_VERSION && !!g.reverse !== !!a.reverse) return null;
-        const vg = val(g), va = val(a), tol = tolOf(Math.max(vg, va));
         let coin = false;
         if (Math.abs(vg - va) > tol) {
           if (!CONFIG.ASK_COINS || vg < va || vg > va * (1 + CONFIG.COIN_MAX_PCT)) return null;
@@ -471,7 +481,7 @@
       const add = (a, g, sc) => {
         const k = key(g);
         usedHere.add(k); askedHere.add(key(a));
-        pairs.push({ ask: a, askId: a.userCardIds[0], give: g, giveId: g.userCardIds[giveUsed.get(k) || 0], wished: !!(c.wish && c.wish.has(k)), coin: sc.coin });
+        pairs.push({ ask: a, askId: a.userCardIds[0], give: g, giveId: g.userCardIds[giveUsed.get(k) || 0], wished: !!(c.wish && c.wish.has(k)), coin: sc.coin, cross: !!sc.cross });
       };
       const giveFree = (g) => !usedHere.has(key(g)) && !isBlocked(key(g)) && (giveUsed.get(key(g)) || 0) < spareOf(g);
       const askFree = (a) => !askedHere.has(key(a)) && !wantedTaken.has(key(a));
@@ -500,6 +510,20 @@
           if (sc && (!best || sc.d < best.sc.d)) best = { g, sc };
         }
         if (best) add(a, best.g, best.sc);
+      }
+      // c) Peu de paires de même rareté (collection presque complète) : on complète par des paires de valeur équivalente
+      if (CONFIG.CROSS_VALUE && pairs.length < CONFIG.CROSS_WHEN_BELOW) {
+        for (const a of c.ask) {
+          if (pairs.length >= CONFIG.MAX_PAIRS) break;
+          if (!askFree(a)) continue;
+          let best = null;
+          for (const g of c.give) {
+            if (!giveFree(g)) continue;
+            const sc = score(g, a, true);
+            if (sc && (!best || sc.d < best.sc.d)) best = { g, sc };
+          }
+          if (best) add(a, best.g, best.sc);
+        }
       }
       return pairs;
     }
@@ -737,7 +761,7 @@
       <div style="margin:10px 0 0;padding:10px;border-radius:12px;background:#222;border:2px solid ${pr.status === 'sent' ? '#1f9d55' : pr.status === 'error' ? '#c0392b' : '#444'}">
         <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px"><b>${esc(pr.partner)} <span style="font-weight:500;color:#aaa;font-size:12px">· ${pr.pairs.length} carte${pr.pairs.length > 1 ? 's' : ''} de chaque côté</span></b>
           <span style="color:#aaa;font-size:12px;white-space:nowrap">reçois ${pr.askTotal}${pr.coins ? ` + ${pr.coins} pièces` : ''} · donnes ${pr.giveTotal}</span></div>
-        ${pr.pairs.map((x) => `<div style="margin:3px 0;font-size:13px"><span style="color:#7ee0a1">Tu reçois</span> ${cardLabel(x.ask)}<br><span style="color:#ffd400">Tu donnes</span> ${cardLabel(x.give)}${x.wished ? ' <small style="color:#7ee0a1">· il la recherche</small>' : ''}</div>`).join('<hr style="border:0;border-top:1px solid #333;margin:6px 0">')}
+        ${pr.pairs.map((x) => `<div style="margin:3px 0;font-size:13px"><span style="color:#7ee0a1">Tu reçois</span> ${cardLabel(x.ask)}<br><span style="color:#ffd400">Tu donnes</span> ${cardLabel(x.give)}${x.wished ? ' <small style="color:#7ee0a1">· il la recherche</small>' : ''}${x.cross ? ' <small style="color:#aaa">· valeur équivalente, rareté différente</small>' : ''}</div>`).join('<hr style="border:0;border-top:1px solid #333;margin:6px 0">')}
         <div style="margin-top:9px">
           ${pr.status === 'ready' ? btn('Envoyer', 'send', i) + btn('Ignorer', 'skip', i, true) : ''}
           ${pr.status === 'sent' ? '<span style="color:#7ee0a1">Proposition envoyée</span>' : ''}
@@ -759,7 +783,7 @@
         ${n != null && n >= max ? '<div style="color:#f88;font-size:12px;margin-top:5px">Limite atteinte : plus d’envoi possible tant qu’un échange n’est pas terminé.</div>' : ''}
       </div>`;
     p.innerHTML = `${counter}
-      <div class="hp-muted" style="font-size:12.5px;margin-bottom:10px">Ses doublons qui te manquent contre tes doublons de même rareté, même version (normale/reverse) et valeur proche (±${Math.round(CONFIG.TOL_PCT * 100)} %, ±${Math.round(CONFIG.TOL_PCT_HIGH * 100)} % au-delà de ${CONFIG.TOL_HIGH_FROM} pièces). Si ta carte vaut plus, il complète en pièces. Raretés hautes d'abord.</div>
+      <div class="hp-muted" style="font-size:12.5px;margin-bottom:10px">Ses doublons qui te manquent contre tes doublons de même rareté, même version (normale/reverse) et valeur proche (±${Math.round(CONFIG.TOL_PCT * 100)} %, ±${Math.round(CONFIG.TOL_PCT_HIGH * 100)} % au-delà de ${CONFIG.TOL_HIGH_FROM} pièces). Si ta carte vaut plus, il complète en pièces. Raretés hautes d'abord. Quand il y a moins de ${CONFIG.CROSS_WHEN_BELOW} paires de même rareté avec un joueur, des paires de valeur équivalente (rareté ou version différente, ${CONFIG.CROSS_MAX_RANK_GAP} niveaux d'écart au plus) complètent.</div>
       <button type="button" class="hp-mini" data-act="search" style="width:100%"${busy ? ' disabled' : ''}>${busy ? 'Recherche en cours…' : 'Chercher des échanges'}</button>
       ${!busy && Object.keys(readScanned()).length ? `<button type="button" class="hp-mini hp-mini--ghost" data-act="resetScan" style="width:100%;margin-top:6px">Rescanner aussi les ${Object.keys(readScanned()).length} joueur(s) déjà vus</button>` : ''}
       ${lastMsg ? `<div style="margin-top:8px;font-size:12.5px;color:#ccc">${lastMsg}</div>` : ''}

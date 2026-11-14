@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.21
+// @version      3.22
 // @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord (complétés par des paires de valeur équivalente quand il y en a peu), avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, et des pièces du compte une fois par heure, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -21,6 +21,7 @@
     TOL_ABS: 2,          // …ou 2 pièces, le plus large des deux (utile pour les petites cartes)
     SAME_RARITY: true,   // exige le même niveau de rareté des deux côtés de chaque paire
     SAME_VERSION: true,  // et la même version : reverse contre reverse, normale contre normale
+    AUTO_DECLINE: true,      // mode auto : refuse les échanges reçus qui me prendraient une carte que je n'ai pas en double, ou m'en donneraient une que j'ai déjà
     CROSS_VALUE: true,       // peu de paires de même rareté avec un joueur : on complète par des paires de valeur équivalente, rareté ou version différente
     CROSS_WHEN_BELOW: 2,     // …seulement s'il y a moins de 2 paires de même rareté avec ce joueur
     CROSS_MAX_RANK_GAP: 2,   // …et au plus 2 niveaux de rareté d'écart entre les deux cartes
@@ -98,7 +99,7 @@
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.message || `${res.status}`);
+    if (!res.ok) throw Object.assign(new Error(data.message || `${res.status}`), { status: res.status });
     return data;
   }
   const list = (d) => (Array.isArray(d) ? d : d.entries || d.cards || []);
@@ -216,6 +217,18 @@
 
   // Annule les propositions envoyées restées sans réponse depuis plus de CANCEL_AFTER_H, ainsi que celles qui ne tiennent plus
   // (mon dernier exemplaire proposé, ou une carte demandée que je possède déjà). Les échanges vers le joueur prioritaire sont exclus.
+  // Refus d'un échange reçu. L'adresse exacte dépend du site : on retient la première qui répond.
+  const declineFailed = new Set();
+  let declinePath = null;
+  async function declineTrade(id) {
+    const paths = declinePath ? [declinePath] : ['decline', 'reject', 'refuse'];
+    let last = null;
+    for (const p of paths) {
+      try { await api('POST', `/trades/${id}/${p}`); declinePath = p; return; }
+      catch (e) { last = e; if (e.status !== 404 && e.status !== 405) throw e; } // adresse inconnue du site : on essaie la suivante
+    }
+    throw last || new Error('refus impossible');
+  }
   const CANCEL_KEY = 'hp-trade-cancel-last';
   async function cancelStale(force) {
     try {
@@ -277,6 +290,34 @@
       await sleep(CONFIG.DELAY);
     }
     const nInvalid = n;
+    // Échanges REÇUS : refusés si une seule carte ne convient pas (demandée mais pas en double chez moi, ou offerte mais déjà possédée)
+    if (CONFIG.AUTO_DECLINE && autoOn) {
+      let received = [];
+      try { received = list(await api('GET', '/trades/received')); } catch {}
+      for (const t of received) {
+        if (t.status !== 'pending' || t.id == null || (myName && t.from === myName) || declineFailed.has(t.id)) continue;
+        let why = null;
+        for (const x of t.requested || []) { // ce qu'il me demande : il doit m'en rester un exemplaire, hors exemplaires en vente
+          const o = kOf(x); if (!o) continue;
+          const info = await owned(o.c, o.rev);
+          if (info && info.n - info.listed < 2) { why = `${o.c.name || o.c.id} demandée, pas en double`; break; }
+        }
+        if (!why) for (const x of t.offered || []) { // ce qu'il me propose : rien que je possède déjà
+          const o = kOf(x); if (!o) continue;
+          const info = await owned(o.c, o.rev);
+          if (info && info.n >= 1) { why = `${o.c.name || o.c.id} proposée, déjà possédée`; break; }
+        }
+        if (!why) continue;
+        try {
+          await declineTrade(t.id);
+          UI.toast(`<b>Échanges</b> : proposition de ${esc(t.from || '?')} refusée (${esc(why)})`, { kind: 'info', ms: 10000 });
+        } catch (e) {
+          declineFailed.add(t.id); // on n'insiste pas sur cette proposition
+          UI.toast(`Refus impossible pour la proposition de ${esc(t.from || '?')} : ${esc(e.message)}`, { kind: 'error', ms: 10000 });
+        }
+        await sleep(CONFIG.DELAY);
+      }
+    }
     for (const t of old) {
       try {
         await api('POST', `/trades/${t.id}/cancel`); n++;

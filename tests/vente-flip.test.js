@@ -58,3 +58,20 @@ test('Vente : sans pause, elle remplit bien les places libres', async () => {
   const calls = await run('holopocket-vendre-doublons.user.js', store, (p) => (p === '/market/counts' ? { selling: 0, maxSelling: 10 } : p === '/trades/sent' ? [] : p.startsWith('/collection') ? { entries: [], pageSize: 50, total: 0 } : {}));
   assert(calls.includes('GET /market/counts'), JSON.stringify(calls));
 });
+
+test('Vente : avec 2 normales et 1 seule reverse, c’est une normale qui part, jamais la reverse unique', async () => {
+  const store = { 'hp-sell-auto-on': '1' };
+  const posted = [];
+  // availableIds contient aussi l'exemplaire reverse (r1), comme sur la fiche de carte du site
+  const entry = { id: 'c1', name: 'Évoli', availableIds: ['r1', 'n1', 'n2'], availableReverseIds: ['r1'], owned: { normal: 2, reverse: 1 }, marketValue: 80, reverseMarketValue: 120 };
+  await run('holopocket-vendre-doublons.user.js', store, (p, o) => {
+    if (o.method === 'POST' && p === '/market') { posted.push(JSON.parse(o.body).userCardId); return {}; }
+    if (p === '/market/counts') return { selling: 0, maxSelling: 10 };
+    if (p === '/trades/sent') return [];
+    if (p === '/market/mine/selling') return [];
+    if (p.startsWith('/collection')) return { entries: [entry], pageSize: 50, total: 1 };
+    if (p.startsWith('/cards/')) return { versions: [{ reverse: false, suggestedStart: 70 }, { reverse: true, suggestedStart: 110 }] };
+    return {};
+  });
+  assert.deepStrictEqual(posted, ['n1']);
+});

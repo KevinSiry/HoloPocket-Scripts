@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Vendre mes doublons
 // @namespace    kevin.holopocket
-// @version      4.9
+// @version      4.10
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-vendre-doublons.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-vendre-doublons.user.js
 // @description  Marché : met en vente les doublons (prix conseillé, les plus chers d'abord), à la demande ou en mode auto qui remplit les slots dès qu'une place se libère.
@@ -51,8 +51,11 @@
   function candidates(entries, promised) {
     const list = [];
     for (const e of entries) {
+      // Sur le site, availableIds peut aussi contenir les exemplaires reverse : on les retire, comme Recyclage, Échanges et Achat-revente
+      // (sinon la reverse unique pourrait partir à la place d'une normale en double)
+      const revIds = new Set(e.availableReverseIds || []);
       const versions = [
-        { reverse: false, ids: e.availableIds || [], owned: e.owned?.normal ?? 0, value: e.marketValue },
+        { reverse: false, ids: (e.availableIds || []).filter((id) => !revIds.has(id)), owned: e.owned?.normal ?? 0, value: e.marketValue },
         { reverse: true, ids: e.availableReverseIds || [], owned: e.owned?.reverse ?? 0, value: e.reverseMarketValue },
       ];
       for (const v of versions) {

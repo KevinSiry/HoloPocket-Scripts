@@ -93,3 +93,13 @@ test('mode « optimal » : conservé, suivi par les comptes, comparé sans séri
   assert.ok(same({ mode: 'optimal' }, { mode: 'optimal', setId: null }));
   assert.ok(!same({ mode: 'optimal' }, { mode: 'auto', setId: null }));
 });
+
+test('mode « quêtes du Tour des Arènes » : accepté, gardé, relu', () => {
+  const s = createStore(null);
+  s.setGlobal({ mode: 'quests' });
+  assert.deepStrictEqual(s.desired('c1'), { mode: 'quests' });
+  s.setChoice('c2', { mode: 'quests' });
+  assert.deepStrictEqual(s.choice('c2'), { mode: 'quests' });
+  const { sanitize } = require('../lib/booster');
+  assert.deepStrictEqual(sanitize({ global: { mode: 'quests' }, accounts: { a: { mode: 'quests' }, b: { mode: 'bidon' } } }), { global: { mode: 'quests' }, accounts: { a: { mode: 'quests' } } });
+});

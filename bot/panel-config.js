@@ -6,6 +6,10 @@ const KNOWN_SCRIPTS = ['auto-booster', 'echanges', 'vendre-doublons', 'recyclage
 const toFile = (name) => `holopocket-${name}.user.js`;
 const toName = (file) => file.replace(/^holopocket-|\.user\.js$/g, '');
 
+// Modes de choix automatique du booster (en plus de « fixed », série fixe)
+const AUTO_MODES = ['auto', 'optimal', 'quests'];
+const BOOSTER_LABELS = { auto: 'auto (meilleur favori)', optimal: 'optimisation des nouvelles cartes', quests: 'quêtes du Tour des Arènes' };
+
 const defaults = () => ({ booster: { mode: 'auto' }, scripts: {} });
 
 // Ne garde que ce qui est valide : jamais de contenu inattendu dans les réglages
@@ -13,7 +17,7 @@ function sanitize(raw) {
   const out = defaults();
   const b = raw && raw.booster;
   if (b && b.mode === 'fixed' && typeof b.setId === 'string' && b.setId.trim()) out.booster = { mode: 'fixed', setId: b.setId.trim() };
-  else if (b && b.mode === 'optimal') out.booster = { mode: 'optimal' };
+  else if (b && b.mode !== 'auto' && AUTO_MODES.includes(b.mode)) out.booster = { mode: b.mode };
   const sc = raw && raw.scripts;
   if (sc && typeof sc === 'object') for (const n of KNOWN_SCRIPTS) if (typeof sc[n] === 'boolean') out.scripts[n] = sc[n];
   return out;
@@ -59,7 +63,7 @@ function validatePatch(patch, sets) {
   if ('booster' in patch) {
     const b = patch.booster;
     if (!b || typeof b !== 'object') return { ok: false, error: 'booster : objet attendu' };
-    if (b.mode !== 'auto' && b.mode !== 'fixed' && b.mode !== 'optimal') return { ok: false, error: 'booster.mode : auto, optimal ou fixed' };
+    if (b.mode !== 'fixed' && !AUTO_MODES.includes(b.mode)) return { ok: false, error: `booster.mode : ${AUTO_MODES.join(', ')} ou fixed` };
     if (b.mode === 'fixed') {
       if (typeof b.setId !== 'string' || !b.setId.trim()) return { ok: false, error: 'booster.setId requis en mode fixed' };
       const id = b.setId.trim().toLowerCase();
@@ -79,4 +83,4 @@ function validatePatch(patch, sets) {
   return { ok: true };
 }
 
-module.exports = { KNOWN_SCRIPTS, toFile, toName, readConfig, writeConfig, mergeConfig, applyScripts, validatePatch, sanitize };
+module.exports = { AUTO_MODES, BOOSTER_LABELS, KNOWN_SCRIPTS, toFile, toName, readConfig, writeConfig, mergeConfig, applyScripts, validatePatch, sanitize };

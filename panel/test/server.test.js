@@ -135,6 +135,8 @@ test('booster global : enregistré, appliqué aux comptes qui le suivent, entré
   // le compte prend son propre choix
   await s.req('PUT', '/api/bots/c1/booster', { body: { mode: 'auto' }, headers: h, cookie });
   assert.deepStrictEqual(pushed.at(-1), ['c1', { booster: { mode: 'auto' } }]);
+  await s.req('PUT', '/api/bots/c1/booster', { body: { mode: 'quests' }, headers: h, cookie });
+  assert.deepStrictEqual(pushed.at(-1), ['c1', { booster: { mode: 'quests' } }]);
   assert.strictEqual((await s.req('PUT', '/api/bots/zzz/booster', { body: { mode: 'auto' }, headers: h, cookie })).status, 404);
   // la route générale ne règle plus le booster
   assert.strictEqual((await s.req('PUT', '/api/bots/c1/config', { body: { booster: { mode: 'auto' } }, headers: h, cookie })).status, 400);
@@ -256,4 +258,19 @@ test('liste interne pour la flotte : jeton obligatoire, mots de passe déchiffr�
   const ok = await fetch(url, { headers: { Authorization: `Bearer ${'tok'.repeat(10)}` } });
   assert.deepStrictEqual(await ok.json(), { accounts: [{ username: 'Alice', password: 'secret1', enabled: true }] });
   srv.close();
+});
+
+test('favicon : 204 sans session (plus de 404 dans le navigateur)', async () => {
+  const s = await boot();
+  assert.strictEqual((await s.req('GET', '/favicon.ico')).status, 204);
+  s.close();
+});
+test('lectures des bots partagées : deux vues simultanées → une seule lecture', async () => {
+  let n = 0;
+  const st = { name: 'c1', online: true, lastSeen: Date.now(), status: null, logs: [] };
+  const s = await boot({ fns: { refreshAll: async () => { n++; await new Promise((r) => setTimeout(r, 50)); return [st]; } } });
+  const cookie = await s.session();
+  await Promise.all([s.req('GET', '/api/overview', { cookie }), s.req('GET', '/api/overview', { cookie })]);
+  assert.strictEqual(n, 1);
+  s.close();
 });

@@ -5,7 +5,7 @@ const path = require('path');
 const auth = require('./lib/auth');
 const { parseBots, createBots } = require('./lib/bots');
 const { computeAlerts, createAlertTracker } = require('./lib/alerts');
-const { createStore, createReconciler } = require('./lib/booster');
+const { createStore, createReconciler, valid: validChoice } = require('./lib/booster');
 const { createVault } = require('./lib/vault');
 const { createAccountStore } = require('./lib/accounts');
 const { createFleetClient } = require('./lib/fleet-client');
@@ -28,6 +28,12 @@ function createApp(opts) {
   const createGapMs = opts.createGapMs ?? 30000; // une création de compte à la fois, 30 s d'écart au minimum
   let creating = false; let lastCreateAt = 0;
   const store = opts.store || createStore(null);
+  // Fichiers de l'interface : lus une fois (ils ne changent qu'avec une nouvelle image Docker)
+  const files = new Map();
+  const file = (f) => { if (!files.has(f)) files.set(f, fs.readFileSync(path.join(PUBLIC, f), 'utf8')); return files.get(f); };
+  // Une seule lecture des bots à la fois : plusieurs onglets ouverts et la boucle de fond partagent la même
+  let inflight = null;
+  const refreshAll = () => inflight || (inflight = bots.refreshAll().finally(() => { inflight = null; }));
   const tracker = createAlertTracker();
   const rec = opts.reconciler || createReconciler({ store, push: (n, p) => bots.config(n, p) });
   const throttle = opts.throttle || auth.createThrottle({ now });
@@ -54,14 +60,14 @@ function createApp(opts) {
       const url = new URL(req.url, 'http://panel');
       const p = url.pathname;
       if (p === '/healthz') return send(res, 200, 'ok', 'text/plain');
+      if (p === '/favicon.ico') { res.writeHead(204, HEADERS); return res.end(); }
 
       if (req.method === 'GET' && STATIC[p]) {
-        const f = p === '/login' ? 'login.html' : p.slice(1);
-        return send(res, 200, fs.readFileSync(path.join(PUBLIC, f), 'utf8'), STATIC[p]);
+        return send(res, 200, file(p === '/login' ? 'login.html' : p.slice(1)), STATIC[p]);
       }
       if (req.method === 'GET' && p === '/') {
         if (!loggedIn(req)) return send(res, 302, '', 'text/plain', { Location: '/login' });
-        return send(res, 200, fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8'), 'text/html; charset=utf-8');
+        return send(res, 200, file('index.html'), 'text/html; charset=utf-8');
       }
 
       // Toute modification exige l'en-tête X-Panel (un formulaire venu d'un autre site ne peut pas l'ajouter)
@@ -83,7 +89,7 @@ function createApp(opts) {
       if (!loggedIn(req)) return send(res, 401, { error: 'non connecté' });
 
       if (req.method === 'GET' && p === '/api/overview') {
-        const list = await bots.refreshAll();
+        const list = await refreshAll();
         await rec.run(list);
         const errs = rec.errors();
         const view = (b, extra = {}) => ({ name: b.name, online: b.online, lastSeen: b.lastSeen ? new Date(b.lastSeen).toISOString() : null, status: b.status, error: b.error || null, booster: { choice: store.choice(b.name), error: errs[b.name] || null }, ...extra });
@@ -168,7 +174,7 @@ function createApp(opts) {
       }
 
       // Booster : réglage global et choix par compte (c'est le panel qui l'envoie aux bots)
-      const okChoice = (v, allowGlobal) => v && typeof v === 'object' && (v.mode === 'auto' || v.mode === 'optimal' || (allowGlobal && v.mode === 'global') || (v.mode === 'fixed' && typeof v.setId === 'string' && v.setId.trim()));
+      const okChoice = (v, allowGlobal) => v && typeof v === 'object' && ((allowGlobal && v.mode === 'global') || validChoice(v));
       if (req.method === 'PUT' && (p === '/api/booster/global' || /^\/api\/bots\/[^/]+\/booster$/.test(p))) {
         let v; try { v = JSON.parse(await readBody(req)); } catch (e) { if (e.status) throw e; return send(res, 400, { error: 'JSON invalide' }); }
         const isGlobal = p === '/api/booster/global';
@@ -177,7 +183,7 @@ function createApp(opts) {
         if (!okChoice(v, !isGlobal)) return send(res, 400, { error: 'réglage de booster invalide' });
         if (isGlobal) store.setGlobal(v); else store.setChoice(name, v);
         rec.forget();
-        await rec.run(await bots.refreshAll());
+        await rec.run(await refreshAll());
         const errs = rec.errors();
         const failed = isGlobal ? Object.keys(errs) : (errs[name] ? [name] : []);
         return send(res, 200, { ok: true, failed: failed.map((n) => ({ name: n, error: errs[n] })) });
@@ -205,6 +211,7 @@ function createApp(opts) {
       return send(res, e.status || 500, { error: e.status ? e.message : 'erreur interne' });
     }
   });
+  server.refreshAll = refreshAll;
   return server;
 }
 
@@ -249,7 +256,7 @@ function main() {
     trustProxy: env.PANEL_TRUST_PROXY === '1', secureCookie: env.PANEL_INSECURE_COOKIE !== '1',
   });
   // Les journaux et alertes se construisent même quand personne ne regarde le panel
-  setInterval(() => bots.refreshAll().then((l) => reconciler.run(l)).catch(() => {}), 20000);
+  setInterval(() => app.refreshAll().then((l) => reconciler.run(l)).catch(() => {}), 20000);
   const port = +(env.PANEL_PORT || 8080);
   app.listen(port, '0.0.0.0', () => console.log(`Panel à l’écoute sur le port ${port} · ${fleetMode ? 'mode flotte' : `${bots.names().length} compte(s)`}`));
 }

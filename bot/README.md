@@ -40,7 +40,7 @@ git pull && docker compose up -d --build    # mettre à jour le bot lui-même (l
 
 ## Panel de gestion
 
-Un site protégé par mot de passe : vue d'ensemble des comptes (pièces, énergie, échanges n/20, ventes, en ligne ou non), **booster à ouvrir** (un réglage global que les comptes suivent par défaut, modifiable par compte), scripts activables par compte, journal et alertes.
+Un site protégé par mot de passe : vue d'ensemble des comptes (pièces, énergie, échanges n/20, ventes, en ligne ou non), **booster à ouvrir** (un réglage global que les comptes suivent par défaut, modifiable par compte : meilleur favori, optimisation des nouvelles cartes, quêtes du Tour des Arènes — quêtes d'arène, puis secrets, puis nouvelles cartes — ou série fixe), scripts activables par compte, journal et alertes.
 Les réglages sont conservés dans le volume de chaque compte (`panel-config.json`) et passent avant `.env.shared`.
 
 ## Comptes : gérés par le panel

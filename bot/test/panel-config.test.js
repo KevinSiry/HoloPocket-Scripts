@@ -66,3 +66,10 @@ test('journal : tampon circulaire et lecture incrémentale', () => {
   assert.deepStrictEqual(b.since(5, 10).lines, []);
   assert.deepStrictEqual(b.since(0, 2).lines.map((l) => l.text), ['ligne 4', 'ligne 5']);
 });
+
+test('booster en mode quêtes : validé et conservé', () => {
+  const pc = require('../panel-config');
+  assert.deepStrictEqual(pc.validatePatch({ booster: { mode: 'quests' } }, []), { ok: true });
+  assert.deepStrictEqual(pc.sanitize({ booster: { mode: 'quests' } }).booster, { mode: 'quests' });
+  assert.strictEqual(pc.validatePatch({ booster: { mode: 'bidon' } }, []).ok, false);
+});

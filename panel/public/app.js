@@ -90,7 +90,9 @@ async function act(card, fn) {
 }
 function toast(text, bad) {
   const t = el('div', bad ? 'toast bad' : 'toast', text);
-  $('toasts').append(t);
+  const box = $('toasts');
+  while (box.children.length >= 4) box.firstElementChild.remove(); // pas de pile de notifications qui mange l'écran
+  box.append(t);
   setTimeout(() => t.remove(), bad ? 8000 : 4000);
 }
 
@@ -102,6 +104,7 @@ const setChoices = (sets) => sets.filter((x) => !x.promo)
   .sort((a, b) => (b.star ? 1 : 0) - (a.star ? 1 : 0) || a.label.localeCompare(b.label, 'fr'));
 // Modes automatiques, toujours en tête de liste
 const MODE_OPTIMAL = { value: 'optimal', label: 'Optimisation des nouvelles cartes', group: 'Choix automatique', search: 'optimisation nouvelles cartes optimal energie', hint: 'Toutes les séries : la meilleure chance de nouvelle carte par point d’énergie' };
+const MODE_QUESTS = { value: 'quests', label: 'Quêtes du Tour des Arènes', group: 'Choix automatique', search: 'quetes quete tour arenes arene secrets badges champion', hint: 'L’extension qui fait le plus avancer tes quêtes d’arène, puis celles des secrets, sinon les nouvelles cartes' };
 const MODE_AUTO = { value: 'auto', label: 'Meilleur favori', group: 'Choix automatique', search: 'auto meilleur favori', hint: 'Parmi tes séries favorites : la meilleure chance de nouvelle carte' };
 // Recherche sans tenir compte des accents ni de la casse
 const fold_ = (s) => String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
@@ -218,10 +221,12 @@ function searchSelect({ label, value, pinned = [], choices, onChange }) {
   showCur();
   return root;
 }
-const describe = (c, sets) => (c.mode === 'fixed' ? (sets.find((x) => x.id === c.setId) || { name: c.setId }).name : c.mode === 'optimal' ? MODE_OPTIMAL.label : MODE_AUTO.label);
-// valeur du <select> <-> choix
-const toValue = (c) => (c.mode === 'global' ? 'global' : c.mode === 'auto' ? 'auto' : c.mode === 'optimal' ? 'optimal' : `set:${c.setId}`);
-const fromValue = (v) => (v === 'global' ? { mode: 'global' } : v === 'auto' ? { mode: 'auto' } : v === 'optimal' ? { mode: 'optimal' } : { mode: 'fixed', setId: v.slice(4) });
+const MODES = { auto: MODE_AUTO, optimal: MODE_OPTIMAL, quests: MODE_QUESTS };
+const AUTO_PINNED = [MODE_QUESTS, MODE_OPTIMAL, MODE_AUTO];
+const describe = (c, sets) => (c.mode === 'fixed' ? (sets.find((x) => x.id === c.setId) || { name: c.setId }).name : (MODES[c.mode] || MODE_AUTO).label);
+// valeur de la liste <-> choix
+const toValue = (c) => (c.mode === 'global' || MODES[c.mode] ? c.mode : `set:${c.setId}`);
+const fromValue = (v) => (v === 'global' || MODES[v] ? { mode: v } : { mode: 'fixed', setId: v.slice(4) });
 const sendBooster = (url, v) => api('PUT', url, fromValue(v)).then((r) => {
   if (r.failed && r.failed.length) toast(`Refusé par : ${r.failed.map((f) => `${f.name} (${f.error})`).join(', ')}`, true);
   else toast('Booster enregistré');
@@ -235,7 +240,7 @@ function boosterBlock(bot, card, globalChoice) {
   const sel = searchSelect({
     label: `Booster du compte ${bot.name}`,
     value: toValue(bot.booster.choice),
-    pinned: [{ value: 'global', label: 'Suivre le réglage global', group: 'Choix automatique', search: 'global suivre', hint: `Actuellement : ${describe(globalChoice, sets)}` }, MODE_OPTIMAL, MODE_AUTO],
+    pinned: [{ value: 'global', label: 'Suivre le réglage global', group: 'Choix automatique', search: 'global suivre', hint: `Actuellement : ${describe(globalChoice, sets)}` }, ...AUTO_PINNED],
     choices: setChoices(sets),
     onChange: (v) => act(card, () => sendBooster(`/api/bots/${encodeURIComponent(bot.name)}/booster`, v)),
   });
@@ -244,6 +249,9 @@ function boosterBlock(bot, card, globalChoice) {
   if (bot.booster.error) box.append(el('p', 'err', `Non appliqué : ${bot.booster.error}`));
   else if (s.booster.mode === 'auto' && s.booster.favorites.length) box.append(el('p', 'muted', `Favoris : ${s.booster.favorites.map((f) => f.name).join(', ')}`));
   else if (s.booster.mode === 'optimal') box.append(el('p', 'muted', 'Toutes les séries sont comparées : chance de nouvelle carte divisée par le coût en énergie.'));
+  else if (s.booster.mode === 'quests') box.append(el('p', 'muted', 'Quêtes d’arène d’abord, puis quêtes des secrets ; sans quête jouable en booster, la meilleure chance de nouvelle carte.'));
+  const last = s.booster.last;
+  if (last && last.set) box.append(el('p', 'muted', `Dernier booster : ${last.set}${last.reason ? `, ${last.reason}` : ''} (${ago(last.at)})`));
   return box;
 }
 
@@ -255,7 +263,7 @@ function globalBar(globalChoice, bots) {
   const sel = searchSelect({
     label: 'Booster global',
     value: toValue(globalChoice),
-    pinned: [MODE_OPTIMAL, MODE_AUTO],
+    pinned: AUTO_PINNED,
     choices: setChoices(sets),
     onChange: (v) => act(bar, () => sendBooster('/api/booster/global', v)),
   });
@@ -364,7 +372,7 @@ async function accountCard(bot, globalChoice) {
   const acts = manage ? manageBlock(bot, card) : el('div', 'actions');
   acts.prepend(r);
   parts.push(acts);
-  const choice = bot.booster.choice.mode === 'global' ? 'booster global' : bot.booster.choice.mode === 'auto' ? 'meilleur favori' : bot.booster.choice.mode === 'optimal' ? 'booster optimisé' : 'booster fixe';
+  const choice = { global: 'booster global', auto: 'meilleur favori', optimal: 'booster optimisé', quests: 'quêtes d’arène' }[bot.booster.choice.mode] || 'booster fixe';
   card.append(fold(bot.name, bot.booster.error ? 'Réglages (booster non appliqué)' : `Réglages, ${choice}`, ...parts));
   return card;
 }
@@ -442,8 +450,13 @@ function logBody(l) {
   }
   return body;
 }
+let logSig = '';
 function renderLogs(lines) {
   const ol = $('logList');
+  // Rien de neuf : on ne redessine pas (garde la sélection de texte et le défilement)
+  const sig = `${lines.length}|${lines.length ? `${lines[lines.length - 1].bot}#${lines[lines.length - 1].id}` : ''}`;
+  if (sig === logSig) return;
+  logSig = sig;
   ol.replaceChildren();
   for (const l of lines.slice().reverse()) {
     const li = el('li', /\(nouvelle\)/.test(l.text) ? `${l.level} fresh` : l.level); // booster avec une nouvelle carte : repère doré
@@ -510,7 +523,8 @@ async function refresh(force) {
     renderAlerts(d.alerts);
     renderSummary(d);
     // Liste des séries (la même pour tous les comptes) : lue une fois sur le premier bot en ligne
-    if (!openSets._any || !openSets._any.length) { const on = d.bots.find((b) => b.online); if (on) { try { openSets._any = await api('GET', `/api/bots/${encodeURIComponent(on.name)}/sets`); } catch {} } }
+    // (relue toutes les 10 min : les favoris changent)
+    if (!openSets._any || !openSets._any.length || Date.now() - (openSets.at || 0) > 600000) { const on = d.bots.find((b) => b.online); if (on) { try { openSets._any = await api('GET', `/api/bots/${encodeURIComponent(on.name)}/sets`); openSets.at = Date.now(); } catch {} } }
     const cards = d.bots.map((b) => accountCard(b, d.booster.global));
     const resolved = await Promise.all(cards);
     // Pas de reconstruction pendant qu'un menu ou un champ est utilisé (sinon la liste se referme)
@@ -527,34 +541,58 @@ async function refresh(force) {
       chSel.replaceChildren(...online.map((n) => { const o = el('option', null, n); o.value = n; return o; }));
       if (online.includes(keep)) chSel.value = keep; else if (!$('chances').hidden) refreshChances(false);
     }
-    const sel = $('logBot');
-    if (sel.options.length === 1) for (const b of d.bots) { const o = el('option', null, b.name); o.value = b.name; sel.append(o); }
+    // Comptes proposés dans le journal : suivent les ajouts et suppressions
+    const sel = $('logBot'), names = d.bots.map((b) => b.name);
+    if ([...sel.options].slice(1).map((o) => o.value).join('|') !== names.join('|')) {
+      const keep = sel.value;
+      sel.replaceChildren(sel.options[0], ...names.map((n) => { const o = el('option', null, n); o.value = n; return o; }));
+      sel.value = names.includes(keep) ? keep : '';
+    }
     $('stamp').textContent = `Mis à jour à ${new Date(d.at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
     if (!$('logs').hidden) await refreshLogs();
   } catch (e) { $('stamp').textContent = `Erreur : ${e.message}`; }
 }
-async function refreshLogs() {
+async function refreshLogs(reset) {
+  if (reset === true || (reset && reset.type)) logSig = ''; // filtre changé : on redessine
   const q = new URLSearchParams();
   if ($('logBot').value) q.set('bot', $('logBot').value);
   const d = await api('GET', `/api/logs?${q}`);
   renderLogs($('logWarn').checked ? d.lines.filter((l) => l.level !== 'info') : d.lines);
 }
 
-for (const b of document.querySelectorAll('.tab')) b.addEventListener('click', () => {
-  for (const x of document.querySelectorAll('.tab')) { x.classList.toggle('on', x === b); x.setAttribute('aria-selected', String(x === b)); }
+const TABS = [...document.querySelectorAll('.tab')];
+const HASH = { accounts: '', logs: '#journal', chances: '#chances' };
+function showTab(b, focus) {
+  for (const x of TABS) { x.classList.toggle('on', x === b); x.setAttribute('aria-selected', String(x === b)); x.tabIndex = x === b ? 0 : -1; }
+  if (focus) b.focus();
+  history.replaceState(null, '', HASH[b.dataset.tab] || location.pathname);
   $('accounts').hidden = b.dataset.tab !== 'accounts';
   $('toolbar').hidden = b.dataset.tab !== 'accounts';
   $('summary').hidden = b.dataset.tab !== 'accounts';
   $('logs').hidden = b.dataset.tab !== 'logs';
   $('chances').hidden = b.dataset.tab !== 'chances';
   if (b.dataset.tab === 'chances') refreshChances(false);
+  if (b.dataset.tab === 'logs') logSig = '';
   refresh(true);
-});
-$('logBot').addEventListener('change', refreshLogs);
+}
+for (const b of TABS) {
+  b.addEventListener('click', () => showTab(b));
+  // Onglets au clavier : ← → Début Fin
+  b.addEventListener('keydown', (e) => {
+    const i = TABS.indexOf(b);
+    const j = e.key === 'ArrowRight' ? (i + 1) % TABS.length : e.key === 'ArrowLeft' ? (i - 1 + TABS.length) % TABS.length : e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : -1;
+    if (j >= 0) { e.preventDefault(); showTab(TABS[j], true); }
+  });
+}
+$('logBot').addEventListener('change', () => refreshLogs(true));
 $('chBot').addEventListener('change', () => { $('chList').replaceChildren(); refreshChances(false); });
 $('chSort').addEventListener('change', () => refreshChances(false));
 $('chRefresh').addEventListener('click', () => refreshChances(true));
-$('logWarn').addEventListener('change', refreshLogs);
+$('logWarn').addEventListener('change', () => refreshLogs(true));
 $('logout').addEventListener('click', async () => { await api('POST', '/api/logout').catch(() => {}); location.href = '/login'; });
-refresh(true);
-setInterval(refresh, 5000);
+// Onglet ouvert au chargement : celui de l'adresse (#journal, #chances)
+const startTab = TABS.find((b) => HASH[b.dataset.tab] && HASH[b.dataset.tab] === location.hash);
+if (startTab) showTab(startTab); else { TABS.forEach((x, i) => { x.tabIndex = i ? -1 : 0; }); refresh(true); }
+// Pas d'appels quand la page est en arrière-plan ; mise à jour immédiate au retour
+setInterval(() => { if (!document.hidden) refresh(); }, 5000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });

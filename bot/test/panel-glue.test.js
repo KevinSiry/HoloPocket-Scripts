@@ -73,7 +73,7 @@ test('état : compte, échanges (seulement les miens en attente), ventes, script
   assert.deepStrictEqual(st.trades, { open: 1, max: 20, fullSince: null });
   assert.deepStrictEqual(st.sales, { selling: 2, max: 10 });
   assert.strictEqual(st.bot.sessionOk, true);
-  assert.deepStrictEqual(st.booster, { mode: 'auto', setId: null, favorites: [{ id: 'me05', name: 'Nuit Noire' }] });
+  assert.deepStrictEqual(st.booster, { mode: 'auto', setId: null, favorites: [{ id: 'me05', name: 'Nuit Noire' }], last: null });
   assert.deepStrictEqual(st.scripts.map((x) => [x.name, x.on]),
     [['auto-booster', true], ['echanges', true], ['vendre-doublons', false], ['recyclage', false], ['achat-revente', false], ['achat-manquantes', false]]);
 });
@@ -204,4 +204,18 @@ test('chances : échec signalé, pas de nouvel essai avant 1 min', async () => {
   assert.strictEqual(r.computing, false);
   assert.match(r.error, /site muet/);
   assert.strictEqual(s.rec.chanceRuns, 1);
+});
+
+test('état : dernier booster ouvert par l’ouverture auto, avec sa raison', async () => {
+  const s = setup();
+  s.world.site.lastPack = { at: 1_700_000_000_000, set: 'Nuit Noire', setId: 'me05', reason: 'quête d’arène « Ouvre 3 cartes Feu » (1/3)' };
+  const st = await s.glue.status();
+  assert.deepStrictEqual(st.booster.last, { at: new Date(1_700_000_000_000).toISOString(), set: 'Nuit Noire', reason: 'quête d’arène « Ouvre 3 cartes Feu » (1/3)' });
+});
+
+test('réglage du booster en mode quêtes : enregistré et journalisé', async () => {
+  const s = setup();
+  await s.glue.applyConfig({ booster: { mode: 'quests' } });
+  assert.deepStrictEqual(s.state.panelCfg.booster, { mode: 'quests' });
+  assert.deepStrictEqual(pc.readConfig(s.file).booster, { mode: 'quests' });
 });

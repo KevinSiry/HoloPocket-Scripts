@@ -1,13 +1,16 @@
 // Booster à ouvrir : un réglage global du panel que les comptes suivent par défaut, avec un choix propre à un compte possible.
-// Les bots connaissent « auto » (meilleur favori), « optimal » (meilleure chance par énergie, toutes séries) ou « série fixe » : le panel traduit le choix de chaque compte et le leur envoie.
+// Les bots connaissent « auto » (meilleur favori), « optimal » (meilleure chance par énergie, toutes séries),
+// « quests » (quêtes du Tour des Arènes, puis secrets, puis nouvelles cartes) ou « série fixe » : le panel traduit le choix de chaque compte et le leur envoie.
 const fs = require('fs');
 
-const pick = (r) => (r && r.mode === 'fixed' && typeof r.setId === 'string' && r.setId.trim() ? { mode: 'fixed', setId: r.setId.trim() } : r && r.mode === 'optimal' ? { mode: 'optimal' } : { mode: 'auto' });
+const AUTO_MODES = ['auto', 'optimal', 'quests'];
+const valid = (r) => !!r && (AUTO_MODES.includes(r.mode) || (r.mode === 'fixed' && typeof r.setId === 'string' && !!r.setId.trim()));
+const pick = (r) => (r && r.mode === 'fixed' && valid(r) ? { mode: 'fixed', setId: r.setId.trim() } : r && AUTO_MODES.includes(r.mode) ? { mode: r.mode } : { mode: 'auto' });
 
 function sanitize(raw) {
   const out = { global: pick(raw && raw.global), accounts: {} };
   const acc = raw && raw.accounts;
-  if (acc && typeof acc === 'object') for (const [name, v] of Object.entries(acc)) if (v && (v.mode === 'auto' || v.mode === 'fixed' || v.mode === 'optimal')) out.accounts[name] = pick(v);
+  if (acc && typeof acc === 'object') for (const [name, v] of Object.entries(acc)) if (valid(v)) out.accounts[name] = pick(v);
   return out;
 }
 
@@ -65,4 +68,4 @@ function createReconciler({ store, push, now = Date.now, retryMs = 60000 }) {
   };
 }
 
-module.exports = { createStore, createReconciler, sanitize, same };
+module.exports = { createStore, createReconciler, sanitize, same, valid, AUTO_MODES };

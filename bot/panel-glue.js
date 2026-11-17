@@ -19,6 +19,11 @@ function flipSummary(f, beat) {
     log: (Array.isArray(f.log) ? f.log : []).slice(-6).map((l) => ({ at: l.at ? new Date(l.at).toISOString() : null, text: String(l.text || '').slice(0, 200) })),
   };
 }
+// Dernier booster ouvert par l'ouverture auto (écrit par le script dans le localStorage)
+function lastPack(l) {
+  if (!l || typeof l !== 'object' || !l.at) return null;
+  return { at: new Date(l.at).toISOString(), set: String(l.set || l.setId || '').slice(0, 80), reason: String(l.reason || '').slice(0, 200) };
+}
 const arr = (x) => (Array.isArray(x) ? x : (x && (x.entries || x.cards)) || []);
 
 // Exécuté DANS la page : lit les données du compte via l'API du site
@@ -30,7 +35,7 @@ function readSiteState() {
   // La liste des séries bouge très rarement : relue au plus toutes les 10 min
   const cached = window.__hpSets && Date.now() - window.__hpSets.at < 600000;
   return Promise.all([j('/me'), j('/trades/sent'), j('/market/counts'), cached ? window.__hpSets.v : j('/sets')])
-    .then(([me, sent, counts, sets]) => { if (!cached && sets) window.__hpSets = { at: Date.now(), v: sets }; return ({ me, sent, counts, sets, flip: ls('hp-flip-state'), beat: ls('hp-flip-beat') }); });
+    .then(([me, sent, counts, sets]) => { if (!cached && sets) window.__hpSets = { at: Date.now(), v: sets }; return ({ me, sent, counts, sets, flip: ls('hp-flip-state'), beat: ls('hp-flip-beat'), lastPack: ls('hp-booster-last') }); });
 }
 // Exécuté DANS la page : chance d'obtenir au moins une nouvelle carte en ouvrant un booster de chaque série (hors promos).
 // Même calcul que le script d'ouverture auto (une reverse manquante compte comme une nouvelle carte). Séries lues une par une.
@@ -134,6 +139,7 @@ function createGlue(deps) {
         mode: state.panelCfg.booster.mode,
         setId: state.panelCfg.booster.setId || null,
         favorites: arr(d && d.sets).filter((s) => s.favorite && !s.promo).map((s) => ({ id: s.id, name: s.name })),
+        last: lastPack(d && d.lastPack),
       },
     };
     statusCache = { at: t, v };
@@ -188,7 +194,7 @@ function createGlue(deps) {
       await pushToggles();
       if (changed) await load();
       statusCache = { at: 0, v: null };
-      if (patch.booster) log('Panel · booster :', merged.booster.mode === 'fixed' ? `série fixe ${merged.booster.setId}` : merged.booster.mode === 'optimal' ? 'optimisation des nouvelles cartes' : 'auto (meilleur favori)');
+      if (patch.booster) log('Panel · booster :', merged.booster.mode === 'fixed' ? `série fixe ${merged.booster.setId}` : pc.BOOSTER_LABELS[merged.booster.mode] || merged.booster.mode);
       if (patch.scripts) log('Panel · scripts :', cfg.scripts.map(pc.toName).join(', ') || 'aucun');
       return { scriptsReloaded: changed };
     });

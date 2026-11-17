@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         HoloPocket – Ouverture auto dès que l'énergie suffit
 // @namespace    kevin.holopocket
-// @version      2.9
+// @version      3.0
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-auto-booster.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-auto-booster.user.js
-// @description  Surveille l'énergie en arrière-plan. Dès qu'elle suffit (énergie bonus comprise), ouvre 1 booster de la série favorite qui a le plus de chance de donner une nouvelle carte (ou d'une série fixe, ou de la série la plus rentable en nouvelles cartes par point d'énergie, selon le réglage du panel).
+// @description  Surveille l'énergie en arrière-plan. Dès qu'elle suffit (énergie bonus comprise), ouvre 1 booster de la série favorite qui a le plus de chance de donner une nouvelle carte (ou d'une série fixe, ou de la série la plus rentable en nouvelles cartes par point d'énergie, ou de la série qui fait avancer les quêtes du Tour des Arènes, selon le réglage du panel).
 // @match        https://holopocket.fr/*
 // @grant        none
 // @run-at       document-idle
@@ -87,7 +87,7 @@
     chanceCache.set(s.id, { at: Date.now(), row });
     return row;
   }
-  const optimalMode = () => readLS('hp-booster-mode') === 'optimal' && !readLS('hp-booster-force');
+  const boosterMode = () => (readLS('hp-booster-force') ? 'fixed' : readLS('hp-booster-mode'));
 
   // Mode « optimisation des nouvelles cartes » : parmi TOUTES les séries, la meilleure chance de nouvelle carte par point d'énergie
   async function pickOptimal(all) {
@@ -99,12 +99,59 @@
     const useful = rows.filter((r) => r.chance > 0 && r.cost > 0);
     if (!useful.length) return null; // plus aucune nouvelle carte possible : on retombe sur les favoris
     useful.sort((a, b) => b.chance / b.cost - a.chance / a.cost || a.cost - b.cost || b.chance - a.chance);
-    return { ...useful[0], optimal: true };
+    return { ...useful[0], optimal: true, reason: 'optimisation des nouvelles cartes' };
+  }
+
+  // ───────── Mode « quêtes du Tour des Arènes » ─────────
+  // GET /api/tour-quests : quêtes en cours ; chacune donne les extensions qui la font avancer (aims), avec l'énergie estimée pour la finir.
+  // Priorité aux quêtes d'arène (dresseurs, champion), puis aux quêtes des secrets ; sans quête jouable en booster, on vise les nouvelles cartes.
+  const questLeft = (q) => Math.max(1, Number(q.count) || 1) - (Number(q.progress) || 0);
+  const isGymQuest = (q) => q.gym != null && !q.secret;
+  // Chaque extension reçoit la somme, sur les quêtes qu'elle sert, de « 1 / énergie pour finir » : le nombre de quêtes bouclées par point d'énergie.
+  // À égalité, la quête la plus proche de la fin l'emporte.
+  function rankQuestSets(quests, sets) {
+    const byId = new Map(sets.map((s) => [String(s.id), s]));
+    const score = new Map(); // setId → { set, score, best: { quest, energy } }
+    for (const q of quests) {
+      for (const a of q.aims) {
+        const set = byId.get(String(a.setId));
+        if (!set || skipUntil.get(set.id) > Date.now()) continue;
+        const energy = Math.max(1, Number(a.energy) || (Number(a.boosters) || 1) * (set.packCost || 1));
+        const cur = score.get(set.id) || { set, score: 0, best: null };
+        cur.score += 1 / energy;
+        if (!cur.best || energy < cur.best.energy) cur.best = { quest: q, energy };
+        score.set(set.id, cur);
+      }
+    }
+    return [...score.values()].sort((a, b) => b.score - a.score || a.best.energy - b.best.energy);
+  }
+  async function pickQuests(all) {
+    let data;
+    try { data = await api('GET', '/tour-quests'); } catch { return null; } // Tour pas commencé ou site indisponible : on vise les nouvelles cartes
+    const live = (Array.isArray(data && data.quests) ? data.quests : [])
+      .filter((q) => q && !q.done && !q.locked && questLeft(q) > 0 && Array.isArray(q.aims) && q.aims.length);
+    for (const [kind, quests] of [['arène', live.filter(isGymQuest)], ['secret', live.filter((q) => q.secret)]]) {
+      for (const c of rankQuestSets(quests, all)) {
+        try {
+          const row = await rowOf(c.set);
+          const q = c.best.quest;
+          return { ...row, quest: true, reason: `quête ${kind === 'arène' ? 'd’arène' : 'secrète'} « ${q.label} » (${Math.min(q.progress || 0, q.count || 1)}/${Math.max(1, q.count || 1)})` };
+        } catch { skipUntil.set(c.set.id, Date.now() + 3600000); }
+      }
+    }
+    return null;
   }
 
   async function pickBestSet() {
     const all = await api('GET', '/sets');
-    if (optimalMode()) { const best = await pickOptimal(all); if (best) return best; }
+    const mode = boosterMode();
+    if (mode === 'quests') {
+      const q = await pickQuests(all);
+      if (q) return q;
+      const best = await pickOptimal(all); // aucune quête jouable en booster : nouvelles cartes
+      if (best) return { ...best, reason: 'aucune quête en cours : nouvelles cartes' };
+    }
+    if (mode === 'optimal') { const best = await pickOptimal(all); if (best) return best; }
     // Série fixe (réglée depuis le panel : localStorage 'hp-booster-force' = id ou nom) : toujours cette série
     const force = readLS('hp-booster-force');
     let sets;
@@ -123,7 +170,7 @@
     }
     const rows = await Promise.all(sets.map((s) => rowOf(s)));
     rows.sort((a, b) => b.chance - a.chance);
-    return rows[0];
+    return { ...rows[0], reason: force ? 'série fixe' : sets.some((s) => s.favorite) ? 'meilleur favori' : 'booster par défaut' };
   }
 
   // ───────── Ouverture ─────────
@@ -183,12 +230,14 @@
         if (best.cost > usable(packs)) break;
         let res;
         try { res = await openOne(best); }
-        catch (e) { if (best.optimal) skipUntil.set(best.id, Date.now() + 3600000); throw e; } // série refusée : une autre sera choisie au prochain passage
+        catch (e) { if (best.optimal || best.quest) skipUntil.set(best.id, Date.now() + 3600000); throw e; } // série refusée : une autre sera choisie au prochain passage
         chanceCache.delete(best.id); // la collection de cette série vient de changer
         state.opens++;
         state.lastSet = best;
         state.lastCards = describeCards(res.cards || [], best.owned);
         state.error = null;
+        // Dernière ouverture, lue par le bot pour le panel
+        try { localStorage.setItem('hp-booster-last', JSON.stringify({ at: Date.now(), set: best.name, setId: best.id, reason: best.reason || '' })); } catch {}
         Object.assign(packs, res.packs || {}); // stock mis à jour par la réponse
         render(packs);
         await sleep(600); // petite pause entre deux ouvertures
@@ -480,7 +529,8 @@
       lastToastOpens = state.opens;
       const fresh = state.lastCards.filter((c) => c.isNew).length;
       const cards = state.lastCards.map((c) => `${esc(c.name)}${c.reverse ? ' (rev.)' : ''}${c.isNew ? ' <b>(nouvelle)</b>' : ''}`).join(', ');
-      UI.toast(`<b>Booster ouvert</b> · ${esc(state.lastSet.name)} · ${fresh ? `${fresh} nouvelle${fresh > 1 ? 's' : ''} carte${fresh > 1 ? 's' : ''}` : 'aucune nouvelle carte'}${cards ? `<br><span class="hp-muted">${cards}</span>` : ''}`, { kind: 'success', ms: 12000 });
+      const why = state.lastSet.quest ? ` · pour la ${esc(state.lastSet.reason)}` : '';
+      UI.toast(`<b>Booster ouvert</b> · ${esc(state.lastSet.name)} · ${fresh ? `${fresh} nouvelle${fresh > 1 ? 's' : ''} carte${fresh > 1 ? 's' : ''}` : 'aucune nouvelle carte'}${why}${cards ? `<br><span class="hp-muted">${cards}</span>` : ''}`, { kind: 'success', ms: 12000 });
       // Carte de valeur : un message à part, repris comme alerte par le panel
       const min = alertValue();
       if (min > 0) for (const c of state.lastCards.filter((x) => x.value >= min)) {

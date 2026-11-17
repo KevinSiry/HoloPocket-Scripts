@@ -36,6 +36,7 @@ async function run(force, o = {}) {
       if (opts.method === 'POST' && p === '/packs/open') { opened.push(JSON.parse(opts.body).setId); return ok({ cards: o.cards || [], packs: { stock: 0, max: 5 } }); }
       if (p === '/me') return ok({ me: { packs: { stock: 5, max: 5 } } });
       if (p === '/sets') return ok(sets);
+      if (p === '/tour-quests') return o.quests === 'error' ? { ok: false, status: 404, json: async () => ({}) } : ok({ quests: o.quests || [] });
       let m = p.match(/^\/sets\/([^/]+)\/booster$/);
       if (m) return ok({ ...BOOSTER, cost: (o.costs || {})[m[1]] || 1 });
       m = p.match(/^\/sets\/([^/]+)$/);
@@ -47,7 +48,7 @@ async function run(force, o = {}) {
   vm.createContext(ctx);
   vm.runInContext(code, ctx);
   await new Promise((r) => setTimeout(r, 400));
-  return { opened, toasts };
+  return { opened, toasts, store };
 }
 
 test('sans réglage : meilleur favori (comportement inchangé)', async () => {
@@ -110,5 +111,52 @@ test('une carte possédée seulement en reverse compte comme manquante en versio
   // A : la seule carte n'existe chez moi qu'en reverse → la version normale manque → A passe devant B (complète)
   const det = (id) => ({ cards: [id === 'setA' ? { id: 'x', rarity: 'C', copies: 1, reverseCopies: 1 } : { id: 'y', rarity: 'C', copies: 1, reverseCopies: 0 }] });
   const r = await run(undefined, { mode: 'optimal', detail: det });
+  assert.deepStrictEqual(r.opened, ['setA']);
+});
+
+// ───────── Mode « quêtes du Tour des Arènes » ─────────
+const SETS3 = [...SETS, { id: 'setC', name: 'Gamma', favorite: false, promo: false }];
+const gym = (id, aims, extra = {}) => ({ id, label: `Quête ${id}`, region: 'kanto', gym: 1, secret: null, progress: 0, count: 3, aims, ...extra });
+const secret = (id, aims, extra = {}) => ({ id, label: `Secret ${id}`, region: 'kanto', gym: null, secret: 's1', progress: 0, count: 2, aims, ...extra });
+const aim = (setId, energy) => ({ setId, setName: setId, boosters: energy, energy });
+
+test('quêtes : la quête d’arène l’emporte sur les nouvelles cartes et sur les secrets', async () => {
+  const r = await run(undefined, { mode: 'quests', sets: SETS3, quests: [secret('s', [aim('setB', 2)]), gym('g', [aim('setC', 40), aim('setA', 10)])] });
+  assert.deepStrictEqual(r.opened, ['setA']);
+  const t = r.toasts.find((m) => /Booster ouvert/.test(m)) || '';
+  assert.match(t, /quête d’arène « Quête g » \(0\/3\)/, t);
+  assert.strictEqual(JSON.parse(r.store['hp-booster-last']).setId, 'setA');
+});
+
+test('quêtes : une extension qui sert plusieurs quêtes d’arène passe devant', async () => {
+  // C sert deux quêtes à 15 d'énergie (2/15) ; A en finit une à 10 (1/10) → C
+  const r = await run(undefined, { mode: 'quests', sets: SETS3, quests: [gym('g1', [aim('setA', 10), aim('setC', 15)]), gym('g2', [aim('setC', 15)])] });
+  assert.deepStrictEqual(r.opened, ['setC']);
+});
+
+test('quêtes : sans quête d’arène jouable, la quête secrète est visée', async () => {
+  const quests = [gym('fini', [aim('setA', 1)], { done: true }), gym('verrou', [aim('setA', 1)], { locked: true }), gym('jeu', []), secret('s', [aim('setC', 5)])];
+  const r = await run(undefined, { mode: 'quests', sets: SETS3, quests });
+  assert.deepStrictEqual(r.opened, ['setC']);
+  assert(r.toasts.some((m) => /quête secrète « Secret s »/.test(m)), JSON.stringify(r.toasts));
+});
+
+test('quêtes : aucune quête → nouvelles cartes (optimisation)', async () => {
+  const r = await run(undefined, { mode: 'quests', quests: [] });
+  assert.deepStrictEqual(r.opened, ['setB']);
+});
+
+test('quêtes : Tour indisponible → nouvelles cartes', async () => {
+  const r = await run(undefined, { mode: 'quests', quests: 'error' });
+  assert.deepStrictEqual(r.opened, ['setB']);
+});
+
+test('quêtes : extension inconnue du site ignorée', async () => {
+  const r = await run(undefined, { mode: 'quests', quests: [gym('g', [aim('zzz', 1)])] });
+  assert.deepStrictEqual(r.opened, ['setB']);
+});
+
+test('quêtes : une série fixe garde la priorité', async () => {
+  const r = await run('setA', { mode: 'quests', sets: SETS3, quests: [gym('g', [aim('setC', 1)])] });
   assert.deepStrictEqual(r.opened, ['setA']);
 });

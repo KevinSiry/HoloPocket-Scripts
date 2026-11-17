@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Ouverture auto dès que l'énergie suffit
 // @namespace    kevin.holopocket
-// @version      3.0
+// @version      3.1
 // @description  Surveille l'énergie en arrière-plan. Dès qu'elle suffit (énergie bonus comprise), ouvre 1 booster de la série favorite qui a le plus de chance de donner une nouvelle carte (ou d'une série fixe, ou de la série la plus rentable en nouvelles cartes par point d'énergie, ou de la série qui fait avancer les quêtes du Tour des Arènes, selon le réglage du panel).
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -32,7 +32,7 @@
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.message || `${res.status} ${data.error || ''}`.trim());
+    if (!res.ok) throw Object.assign(new Error(data.message || `${res.status} ${data.error || ''}`.trim()), { status: res.status });
     return data;
   }
 
@@ -74,6 +74,7 @@
   // Chance de nouvelle carte d'une série. ttl > 0 : valeur gardée ce temps-là (mode « optimisation », qui regarde toutes les séries)
   const chanceCache = new Map(); // id → { at, row }
   const skipUntil = new Map();   // série refusée par le site en mode optimisation → ignorée 1 h
+  const questFails = new Map();  // refus de suite d'une série visée pour une quête
   async function rowOf(s, ttl = 0) {
     const c = chanceCache.get(s.id);
     if (c && Date.now() - c.at < ttl) return c.row;
@@ -123,19 +124,27 @@
     }
     return [...score.values()].sort((a, b) => b.score - a.score || a.best.energy - b.best.energy);
   }
+  // Renvoie la série à ouvrir, { wait } quand une quête existe mais ne peut pas être servie tout de suite,
+  // ou null quand il n'y a vraiment aucune quête jouable en booster (alors seulement : nouvelles cartes)
   async function pickQuests(all) {
     let data;
-    try { data = await api('GET', '/tour-quests'); } catch { return null; } // Tour pas commencé ou site indisponible : on vise les nouvelles cartes
+    try { data = await api('GET', '/tour-quests'); }
+    catch (e) {
+      if (e.status && e.status < 500) return null; // Tour pas commencé (refus du site) : aucune quête
+      return { wait: true, reason: 'quêtes illisibles pour le moment' }; // site ou réseau en panne : on n'ouvre rien d'autre, on réessaie
+    }
     const live = (Array.isArray(data && data.quests) ? data.quests : [])
       .filter((q) => q && !q.done && !q.locked && questLeft(q) > 0 && Array.isArray(q.aims) && q.aims.length);
     for (const [kind, quests] of [['arène', live.filter(isGymQuest)], ['secret', live.filter((q) => q.secret)]]) {
-      for (const c of rankQuestSets(quests, all)) {
+      const ranked = rankQuestSets(quests, all); // séries écartées (refusées 3 fois) exclues
+      for (const c of ranked) {
         try {
           const row = await rowOf(c.set);
           const q = c.best.quest;
           return { ...row, quest: true, reason: `quête ${kind === 'arène' ? 'd’arène' : 'secrète'} « ${q.label} » (${Math.min(q.progress || 0, q.count || 1)}/${Math.max(1, q.count || 1)})` };
-        } catch { skipUntil.set(c.set.id, Date.now() + 3600000); }
+        } catch { /* série illisible ce tour-ci : la suivante */ }
       }
+      if (ranked.length) return { wait: true, reason: `quête ${kind === 'arène' ? 'd’arène' : 'secrète'} en attente` };
     }
     return null;
   }
@@ -145,7 +154,7 @@
     const mode = boosterMode();
     if (mode === 'quests') {
       const q = await pickQuests(all);
-      if (q) return q;
+      if (q) return q; // une série de quête, ou l'attente : jamais de nouvelles cartes tant qu'une quête existe
       const best = await pickOptimal(all); // aucune quête jouable en booster : nouvelles cartes
       if (best) return { ...best, reason: 'aucune quête en cours : nouvelles cartes' };
     }
@@ -180,12 +189,14 @@
   }
 
   // ───────── État & boucle ─────────
-  // Énergie bonus : le champ exact dépend du site, on prend le premier nombre dont le nom contient « bonus »
+  // Énergie bonus : champ packs.bonus du site (à défaut, le premier nombre dont le nom contient « bonus »)
   function bonusOf(p) {
+    if (p && typeof p.bonus === 'number') return Math.max(0, p.bonus);
     for (const [k, v] of Object.entries(p || {})) if (/bonus/i.test(k) && !/max|next|at$|until|expires/i.test(k) && typeof v === 'number' && v > 0) return v;
     return 0;
   }
-  const usable = (p) => (p.stock || 0) + (CONFIG.KEEP_BONUS ? 0 : bonusOf(p));
+  // packs.stock compte DÉJÀ l'énergie bonus (le site l'affiche comme stock - bonus pour la partie qui se recharge) : ne pas l'ajouter une 2e fois
+  const usable = (p) => Math.max(0, (p.stock || 0) - (CONFIG.KEEP_BONUS ? bonusOf(p) : 0));
   const state = { on: false, busy: false, opens: 0, lastCards: [], lastSet: null, nextCheck: 0, error: null };
 
   // Complète chaque carte obtenue : nouvelle pour la collection ? quelle valeur ?
@@ -224,11 +235,18 @@
       while (state.on && packs.stock != null && usable(packs) >= (state.lastCost || 1) && state.opens < CONFIG.MAX_OPENS) {
         const best = await pickBestSet();
         if (!best) { stop('Aucune série en favori (et aucun booster par défaut).'); return; }
+        if (best.wait) break; // quête en cours mais pas jouable maintenant : on attend le prochain passage
         state.lastCost = best.cost;
-        if (best.cost > usable(packs)) break;
+        if (best.cost > usable(packs)) break; // pas assez d'énergie pour CE booster : on attend la recharge, sans ouvrir autre chose
         let res;
         try { res = await openOne(best); }
-        catch (e) { if (best.optimal || best.quest) skipUntil.set(best.id, Date.now() + 3600000); throw e; } // série refusée : une autre sera choisie au prochain passage
+        catch (e) {
+          // Série refusée : écartée 1 h. Pour une quête, seulement après 3 refus de suite (un refus passager ne doit pas faire changer de cible)
+          if (best.optimal) skipUntil.set(best.id, Date.now() + 3600000);
+          if (best.quest) { const n = (questFails.get(best.id) || 0) + 1; questFails.set(best.id, n); if (n >= 3) { questFails.delete(best.id); skipUntil.set(best.id, Date.now() + 3600000); } }
+          throw e;
+        }
+        questFails.delete(best.id);
         chanceCache.delete(best.id); // la collection de cette série vient de changer
         state.opens++;
         state.lastSet = best;
@@ -278,8 +296,9 @@
     if (packs) state.packs = { ...(state.packs || {}), ...packs };
     const p = state.packs || {};
     const bonus = bonusOf(p);
-    let energy = p.stock != null ? `Énergie ${p.stock}/${p.max}${bonus ? ` + ${bonus} bonus` : ''}` : '';
-    if (p.stock != null && p.stock < p.max && p.nextAt) {
+    const regen = p.stock != null ? Math.max(0, p.stock - bonus) : null; // partie qui se recharge (stock compte aussi le bonus)
+    let energy = p.stock != null ? `Énergie ${regen}/${p.max}${bonus ? ` + ${bonus} bonus` : ''}` : '';
+    if (p.stock != null && regen < p.max && p.nextAt) {
       const next = Math.max(0, Math.round((new Date(p.nextAt) - Date.now()) / 1000));
       energy += ` · +1 dans ${mmss(next)}`;
     }

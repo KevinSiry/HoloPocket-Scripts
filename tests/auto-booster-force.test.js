@@ -34,9 +34,9 @@ async function run(force, o = {}) {
       const p = url.replace(/^\/api/, '');
       const ok = (d) => ({ ok: true, status: 200, json: async () => d });
       if (opts.method === 'POST' && p === '/packs/open') { opened.push(JSON.parse(opts.body).setId); return ok({ cards: o.cards || [], packs: { stock: 0, max: 5 } }); }
-      if (p === '/me') return ok({ me: { packs: { stock: 5, max: 5 } } });
+      if (p === '/me') return ok({ me: { packs: o.packs || { stock: 5, max: 5 } } });
       if (p === '/sets') return ok(sets);
-      if (p === '/tour-quests') return o.quests === 'error' ? { ok: false, status: 404, json: async () => ({}) } : ok({ quests: o.quests || [] });
+      if (p === '/tour-quests') return o.quests === 'error' ? { ok: false, status: 404, json: async () => ({}) } : o.quests === 'down' ? { ok: false, status: 502, json: async () => ({}) } : ok({ quests: o.quests || [] });
       let m = p.match(/^\/sets\/([^/]+)\/booster$/);
       if (m) return ok({ ...BOOSTER, cost: (o.costs || {})[m[1]] || 1 });
       m = p.match(/^\/sets\/([^/]+)$/);
@@ -159,4 +159,22 @@ test('quêtes : extension inconnue du site ignorée', async () => {
 test('quêtes : une série fixe garde la priorité', async () => {
   const r = await run('setA', { mode: 'quests', sets: SETS3, quests: [gym('g', [aim('setC', 1)])] });
   assert.deepStrictEqual(r.opened, ['setA']);
+});
+
+test('quêtes : booster de quête trop cher pour l’énergie actuelle → on attend, rien d’autre n’est ouvert', async () => {
+  const r = await run(undefined, { mode: 'quests', sets: SETS3, costs: { setC: 10 }, packs: { stock: 5, max: 10 }, quests: [gym('g', [aim('setC', 40)])] });
+  assert.deepStrictEqual(r.opened, []);
+});
+
+test('énergie bonus comptée une seule fois (stock la contient déjà)', async () => {
+  // 6 d'énergie dont 4 de bonus : pas de quoi ouvrir un booster à 10 (avant : 6 + 4 = 10 → ouverture refusée par le site)
+  const r = await run('setC', { sets: SETS3, costs: { setC: 10 }, packs: { stock: 6, bonus: 4, max: 10 } });
+  assert.deepStrictEqual(r.opened, []);
+  const ok = await run('setC', { sets: SETS3, costs: { setC: 10 }, packs: { stock: 10, bonus: 4, max: 10 } });
+  assert.deepStrictEqual(ok.opened, ['setC']);
+});
+
+test('quêtes : site des quêtes en panne → on attend au lieu d’ouvrir des nouvelles cartes', async () => {
+  const r = await run(undefined, { mode: 'quests', quests: 'down' });
+  assert.deepStrictEqual(r.opened, []);
 });

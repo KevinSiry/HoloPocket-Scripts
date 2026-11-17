@@ -111,7 +111,8 @@ function createGlue(deps) {
     const me = d && d.me && d.me.me;
     const t = now();
     const packs = (me && me.packs) || {};
-    const energyFull = !!me && packs.stock != null && packs.max != null && packs.stock >= packs.max;
+    // stock compte aussi l'énergie bonus : « pleine » = la partie qui se recharge est au maximum
+    const energyFull = !!me && packs.stock != null && packs.max != null && packs.stock - (packs.bonus || 0) >= packs.max;
     watch.energyFullSince = energyFull ? (watch.energyFullSince || t) : null;
     const open = me ? arr(d.sent).filter((x) => x.status === 'pending' && (!x.from || x.from === me.username)).length : null;
     const tradesFull = open != null && open >= TRADES_MAX;

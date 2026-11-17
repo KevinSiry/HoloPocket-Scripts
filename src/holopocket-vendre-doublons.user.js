@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Vendre mes doublons
 // @namespace    kevin.holopocket
-// @version      4.8
+// @version      4.9
 // @description  Marché : met en vente les doublons (prix conseillé, les plus chers d'abord), à la demande ou en mode auto qui remplit les slots dès qu'une place se libère.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -117,7 +117,8 @@
 
   // Marché refusé (compte récent…) : pas d'insistance, pause mémorisée
   const PAUSE_KEY = 'hp-sell-paused-until';
-  const pausedUntil = () => { try { return +localStorage.getItem(PAUSE_KEY) || 0; } catch { return 0; } };
+  // Pause propre à la vente, ou pause du marché partagée avec Achat-revente et Achat des manquantes (marché restreint)
+  const pausedUntil = () => { try { return Math.max(+localStorage.getItem(PAUSE_KEY) || 0, +localStorage.getItem('hp-market-blocked-until') || 0); } catch { return 0; } };
   const pauseSales = (min) => { try { localStorage.setItem(PAUSE_KEY, String(Date.now() + min * 60000)); } catch {} };
   const RESTRICTED = /nouveau|r[ée]cent|restreint|interdit|bloqu|pas encore|avant de pouvoir|\b24\s*h|^403\b/i;
 
@@ -169,6 +170,7 @@
     if (busy) return; busy = true; progress = 'Analyse…'; paint();
     let soldAny = false;
     try {
+      if (Date.now() < pausedUntil() && !CONFIG.DRY_RUN) { toast(`Marché en pause jusqu’à ${new Date(pausedUntil()).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })} (refusé récemment).`, 6000, 'info'); return; }
       const { free, counts } = await freeSlots();
       if (!free && !CONFIG.DRY_RUN) { toast(`Aucune place libre (Mes ventes ${counts.selling}/${counts.maxSelling}).`, 6000, 'info'); return; }
       const { done, failed } = await listFill(CONFIG.DRY_RUN ? Math.max(free, 10) : free, (i, n) => { progress = `${i}/${n}`; paint(); });

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.23
+// @version      3.24
 // @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord (complétés par des paires de valeur équivalente quand il y en a peu), avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, et des pièces du compte une fois par heure, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -22,7 +22,7 @@
     SAME_RARITY: true,   // exige le même niveau de rareté des deux côtés de chaque paire
     SAME_VERSION: true,  // et la même version : reverse contre reverse, normale contre normale
     BUY_WITH_COINS: true,    // places d'échange encore libres après la recherche : propose des pièces contre les doublons qui me manquent
-    BUY_RESERVE: 1000,       // …pièces jamais engagées dans ces offres
+    BUY_RESERVE: 0,          // …pièces jamais engagées dans ces offres (0 = tout le solde peut servir)
     BUY_MAX_PER_TRADE: 400,  // …pièces au plus par proposition
     BUY_MAX_CARDS: 5,        // …cartes au plus par proposition
     AUTO_DECLINE: true,      // mode auto : refuse les échanges reçus qui me prendraient une carte que je n'ai pas en double, ou m'en donneraient une que j'ai déjà
@@ -698,7 +698,7 @@
     }
     if (prop.buy) { // offre en pièces : aucune carte de mon côté, le prix est la valeur des cartes demandées
       const bal = Math.floor(((await api('GET', '/me')).me || {}).balance || 0);
-      if (bal - (log.coinsOut || 0) - prop.pay < CONFIG.BUY_RESERVE) throw new Error('pas assez de pièces pour cette offre (réserve gardée)');
+      if (bal - (log.coinsOut || 0) - prop.pay < CONFIG.BUY_RESERVE) throw new Error('pas assez de pièces pour cette offre');
       try {
         await api('POST', '/trades', { toUsername: prop.partner, offeredUserCardIds: [], requestedUserCardIds: prop.buys.map((b) => b.askId), offeredCoins: prop.pay, requestedCoins: 0 });
       } catch (e) {

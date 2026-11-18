@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.22
+// @version      3.23
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord (complétés par des paires de valeur équivalente quand il y en a peu), avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, et des pièces du compte une fois par heure, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
@@ -23,6 +23,10 @@
     TOL_ABS: 2,          // …ou 2 pièces, le plus large des deux (utile pour les petites cartes)
     SAME_RARITY: true,   // exige le même niveau de rareté des deux côtés de chaque paire
     SAME_VERSION: true,  // et la même version : reverse contre reverse, normale contre normale
+    BUY_WITH_COINS: true,    // places d'échange encore libres après la recherche : propose des pièces contre les doublons qui me manquent
+    BUY_RESERVE: 1000,       // …pièces jamais engagées dans ces offres
+    BUY_MAX_PER_TRADE: 400,  // …pièces au plus par proposition
+    BUY_MAX_CARDS: 5,        // …cartes au plus par proposition
     AUTO_DECLINE: true,      // mode auto : refuse les échanges reçus qui me prendraient une carte que je n'ai pas en double, ou m'en donneraient une que j'ai déjà
     CROSS_VALUE: true,       // peu de paires de même rareté avec un joueur : on complète par des paires de valeur équivalente, rareté ou version différente
     CROSS_WHEN_BELOW: 2,     // …seulement s'il y a moins de 2 paires de même rareté avec ce joueur
@@ -67,7 +71,7 @@
   // Pauses mémorisées dans localStorage : elles survivent au rechargement de la page
   const lsNum = (k) => { try { return +localStorage.getItem(k) || 0; } catch { return 0; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, String(v)); } catch {} };
-  const BLOCKED_KEY = 'hp-trade-blocked-until', PRIORITY_NEXT_KEY = 'hp-priority-next', PRIORITY_COINS_KEY = 'hp-priority-coins-next';
+  const BLOCKED_KEY = 'hp-trade-blocked-until', PRIORITY_NEXT_KEY = 'hp-priority-next', PRIORITY_COINS_KEY = 'hp-priority-coins-next', BUY_OFF_KEY = 'hp-trade-buy-off-until';
   const isBlocked_ = () => Date.now() < lsNum(BLOCKED_KEY);
   // Refus du site qui ressemblent à une restriction du compte (compte récent, échanges interdits…)
   const BLOCK_RE = /nouveau|r[ée]cent|restreint|interdit|bloqu|pas encore|avant de pouvoir|\b24\s*h|^403\b/i;
@@ -165,6 +169,7 @@
     const pendingTo = new Set();
     const promisedIds = new Set(); // exemplaires (userCardId) promis dans un échange en attente
     let openSent = 0;
+    let coinsOut = 0; // pièces que j'ai proposées dans des échanges encore en attente
     const lastByPlayer = new Map(); // joueur → { at, declined, accepted }
     const sendTimes = [];
     let sent = [], hist = [], received = [];
@@ -181,7 +186,7 @@
     for (const t of sent) {
       if (t.from && t.from !== me) continue;
       const at = Date.parse(t.createdAt) || Date.now();
-      if (t.status === 'pending') { pendingTo.add(t.to); openSent++; for (const x of t.offered || []) if (x.userCardId) promisedIds.add(x.userCardId); }
+      if (t.status === 'pending') { pendingTo.add(t.to); openSent++; coinsOut += Math.max(0, Number(t.offeredCoins) || 0); for (const x of t.offered || []) if (x.userCardId) promisedIds.add(x.userCardId); }
       note(t.to, at, false);
       sendTimes.push(at);
       for (const x of t.requested || []) { const c = x.card || x; if (c && c.id) asked.add(`${c.id}|${!!(x.reverse ?? c.reverse)}`); }
@@ -214,7 +219,7 @@
     }
     openTrades = openSent;
     for (const id of localPromised()) promisedIds.add(id);
-    return { asked, offered, pendingTo, openSent, lastByPlayer, promisedIds, sendTimes: [...new Set(sendTimes)].sort((a, b) => a - b) };
+    return { asked, offered, pendingTo, openSent, coinsOut, lastByPlayer, promisedIds, sendTimes: [...new Set(sendTimes)].sort((a, b) => a - b) };
   }
 
   // Annule les propositions envoyées restées sans réponse depuis plus de CANCEL_AFTER_H, ainsi que celles qui ne tiennent plus
@@ -583,6 +588,7 @@
     const scanned = [];
     let full = 0, i = 0;
     const empty = new Set(), noUse = new Map();
+    const coinOnly = []; // joueurs qui ont des doublons pour moi mais à qui je n'ai rien d'équivalent à donner
     for (const p of partners) {
       // assez de joueurs capables de remplir un échange complet : inutile de scanner plus loin
       if (full >= target * 2) break;
@@ -602,7 +608,7 @@
         if (wishBy.has(p)) give.sort((x, y) => (wishBy.get(p).has(key(y)) ? 1 : 0) - (wishBy.get(p).has(key(x)) ? 1 : 0));
         const c = { partner: p, ask, give, wish: wishBy.get(p) || null };
         const pot = buildPairs(c, new Set(log.asked), new Map(log.offered));
-        if (!pot.length) { scannedMem[p] = Date.now(); continue; }
+        if (!pot.length) { scannedMem[p] = Date.now(); coinOnly.push(c); continue; }
         // « complet » seulement avec au moins une carte au-dessus de Rare : sinon on continue à chercher
         if (pot.length >= CONFIG.MAX_PAIRS && pot.some((x) => x.ask.rank >= 4)) full++;
         scanned.push(c);
@@ -643,6 +649,27 @@
         coins: coinsFor(best.pairs),
       });
     }
+    // 3) Places encore libres : offres en pièces contre les doublons qui me manquent, à leur valeur (jamais au-dessus)
+    if (CONFIG.BUY_WITH_COINS && proposals.length < target && Date.now() >= lsNum(BUY_OFF_KEY)) {
+      let budget = 0;
+      try { budget = Math.floor(((await api('GET', '/me')).me || {}).balance || 0) - CONFIG.BUY_RESERVE - (log.coinsOut || 0); } catch {}
+      const cands = [...pool, ...coinOnly].filter((c) => !proposals.some((pr) => pr.partner === c.partner));
+      for (const c of cands) {
+        if (proposals.length >= target || budget < 1) break;
+        const buys = [];
+        let pay = 0;
+        for (const a of c.ask) { // raretés hautes d'abord (ordre du scan)
+          if (buys.length >= CONFIG.BUY_MAX_CARDS) break;
+          const price = Math.ceil(val(a));
+          if (!(price > 0) || wantedTaken.has(key(a)) || pay + price > Math.min(budget, CONFIG.BUY_MAX_PER_TRADE)) continue;
+          buys.push({ ask: a, askId: a.userCardIds[0] }); pay += price;
+        }
+        if (!buys.length) continue;
+        for (const b of buys) wantedTaken.add(key(b.ask));
+        budget -= pay;
+        proposals.push({ partner: c.partner, pairs: [], buys, buy: true, pay, status: 'ready', askTotal: buys.reduce((t, b) => t + val(b.ask), 0), giveTotal: 0, coins: 0 });
+      }
+    }
     return proposals;
   }
 
@@ -671,11 +698,24 @@
       if (!info.ids.includes(x.giveId)) x.giveId = info.ids[0];
       await sleep(CONFIG.DELAY / 2);
     }
+    if (prop.buy) { // offre en pièces : aucune carte de mon côté, le prix est la valeur des cartes demandées
+      const bal = Math.floor(((await api('GET', '/me')).me || {}).balance || 0);
+      if (bal - (log.coinsOut || 0) - prop.pay < CONFIG.BUY_RESERVE) throw new Error('pas assez de pièces pour cette offre (réserve gardée)');
+      try {
+        await api('POST', '/trades', { toUsername: prop.partner, offeredUserCardIds: [], requestedUserCardIds: prop.buys.map((b) => b.askId), offeredCoins: prop.pay, requestedCoins: 0 });
+      } catch (e) {
+        // Le site n'accepte pas une offre sans carte de mon côté : on n'insiste pas pendant 6 h
+        if (/au moins une carte|pi[eè]ces?|coins?/i.test(e.message)) lsSet(BUY_OFF_KEY, Date.now() + 6 * 3600000);
+        throw e;
+      }
+      writeLocal([...readLocal(), { to: prop.partner, at: Date.now() }]);
+      return;
+    }
     await api('POST', '/trades', {
       toUsername: prop.partner,
       offeredUserCardIds: prop.pairs.map((x) => x.giveId),
       requestedUserCardIds: prop.pairs.map((x) => x.askId),
-      offeredCoins: 0, // jamais de pièces de ton côté
+      offeredCoins: 0, // pas de pièces de ton côté dans un échange carte contre carte
       requestedCoins: Math.max(0, Math.round(prop.coins || 0)),
     });
     savePromised(prop.pairs.map((x) => x.giveId)); // les scripts de vente n'y touchent plus
@@ -1034,8 +1074,9 @@
     const p = panel();
     const items = proposals.map((pr, i) => `
       <div style="margin:10px 0 0;padding:10px;border-radius:12px;background:var(--color-panel-2,#242428);border:2px solid ${pr.status === 'sent' ? '#22c55e' : pr.status === 'error' ? '#ef4444' : 'var(--color-line,#313136)'}">
-        <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px"><b>${esc(pr.partner)} <span style="font-weight:500;color:var(--color-muted,#9d9da3);font-size:12px">· ${pr.pairs.length} carte${pr.pairs.length > 1 ? 's' : ''} de chaque côté</span></b>
-          <span style="color:var(--color-muted,#9d9da3);font-size:12px;white-space:nowrap">reçois ${pr.askTotal}${pr.coins ? ` + ${pr.coins} pièces` : ''} · donnes ${pr.giveTotal}</span></div>
+        <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px"><b>${esc(pr.partner)} <span style="font-weight:500;color:var(--color-muted,#9d9da3);font-size:12px">· ${pr.buy ? `${pr.buys.length} carte${pr.buys.length > 1 ? 's' : ''} contre des pièces` : `${pr.pairs.length} carte${pr.pairs.length > 1 ? 's' : ''} de chaque côté`}</span></b>
+          <span style="color:var(--color-muted,#9d9da3);font-size:12px;white-space:nowrap">reçois ${pr.askTotal}${pr.coins ? ` + ${pr.coins} pièces` : ''} · ${pr.buy ? `paies ${pr.pay} pièces` : `donnes ${pr.giveTotal}`}</span></div>
+        ${(pr.buys || []).map((b) => `<div style="margin:3px 0;font-size:13px"><span style="color:#4ade80">Tu reçois</span> ${cardLabel(b.ask)} <small style="color:var(--color-muted,#9d9da3)">· ${Math.ceil(val(b.ask))} pièces</small></div>`).join('')}
         ${pr.pairs.map((x) => `<div style="margin:3px 0;font-size:13px"><span style="color:#4ade80">Tu reçois</span> ${cardLabel(x.ask)}<br><span style="color:var(--color-brand,#ffd60a)">Tu donnes</span> ${cardLabel(x.give)}${x.wished ? ' <small style="color:#4ade80">· il la recherche</small>' : ''}${x.cross ? ' <small style="color:var(--color-muted,#9d9da3)">· valeur équivalente, rareté différente</small>' : ''}</div>`).join('<hr style="border:0;border-top:1px solid var(--color-line,#313136);margin:6px 0">')}
         <div style="margin-top:9px">
           ${pr.status === 'ready' ? btn('Envoyer', 'send', i) + btn('Ignorer', 'skip', i, true) : ''}

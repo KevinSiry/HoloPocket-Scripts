@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.25
+// @version      3.26
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord (complétés par des paires de valeur équivalente quand il y en a peu), avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, et des pièces du compte une fois par heure, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
@@ -80,6 +80,7 @@
   let failStreak = 0, blockToastAt = 0;
   // Un envoi vient d'échouer : suspend tous les échanges si le site refuse le compte, sans insister
   function noteSendFailure(e) {
+    if (e && e.local) return false; // écartée avant l'envoi : ne compte pas comme un refus du site
     failStreak++;
     const restricted = BLOCK_RE.test(e.message);
     if (!restricted && failStreak < 3) return false;
@@ -714,28 +715,31 @@
     try { if (!myName) myName = (await api('GET', '/me')).me.username; await tradeLog(myName); } catch {}
     if (UI.hasPanel(PANEL)) render(); else paint();
   }
+  // Proposition écartée par mes propres vérifications avant l'envoi (dernier exemplaire, carte en vente, joueur en pause…) :
+  // ce n'est pas un refus du site, on passe simplement à la suivante.
+  const skipped = (msg) => Object.assign(new Error(msg), { local: true });
   async function send(prop) {
     if (!myName) myName = (await api('GET', '/me')).me.username;
     // Vérification juste avant l'envoi : rythme global et joueur pas déjà sollicité
     const log = await tradeLog(myName);
-    if (log.openSent >= CONFIG.MAX_OPEN_TRADES) throw new Error(`limite de ${CONFIG.MAX_OPEN_TRADES} échanges en cours atteinte — attends qu'un échange se termine`);
+    if (log.openSent >= CONFIG.MAX_OPEN_TRADES) throw skipped(`limite de ${CONFIG.MAX_OPEN_TRADES} échanges en cours atteinte — attends qu'un échange se termine`);
     const blocked = playerBlocked(prop.partner, log);
-    if (blocked) throw new Error(`${prop.partner} : ${blocked}`);
+    if (blocked) throw skipped(`${prop.partner} : ${blocked}`);
     const gate = sendGate(log);
-    if (!gate.ok) throw new Error(`${gate.reason} — réessaie dans ${fmtWait(gate.wait)}`);
+    if (!gate.ok) throw skipped(`${gate.reason} — réessaie dans ${fmtWait(gate.wait)}`);
     // Dernière vérification sur la fiche de chaque carte donnée : jamais le dernier exemplaire, jamais une carte en vente
     for (const x of (prop.sell ? prop.gives : prop.pairs)) {
       const info = await freeInfo(x.give, log);
       if (info.spare < 1) {
         blockedGive.set(key(x.give), Date.now());
-        throw new Error(`${x.give.name} : dernier exemplaire ou déjà en vente, échange non envoyé`);
+        throw skipped(`${x.give.name} : dernier exemplaire ou déjà en vente, échange non envoyé`);
       }
       if (!info.ids.includes(x.giveId)) x.giveId = info.ids[0];
       await sleep(CONFIG.DELAY / 2);
     }
     if (prop.buy) { // offre en pièces : aucune carte de mon côté, le prix est la valeur des cartes demandées
       const bal = Math.floor(((await api('GET', '/me')).me || {}).balance || 0);
-      if (bal - (log.coinsOut || 0) - prop.pay < CONFIG.BUY_RESERVE) throw new Error('pas assez de pièces pour cette offre');
+      if (bal - (log.coinsOut || 0) - prop.pay < CONFIG.BUY_RESERVE) throw skipped('pas assez de pièces pour cette offre');
       try {
         await api('POST', '/trades', { toUsername: prop.partner, offeredUserCardIds: [], requestedUserCardIds: prop.buys.map((b) => b.askId), offeredCoins: prop.pay, requestedCoins: 0 });
       } catch (e) {
@@ -1231,6 +1235,7 @@
             autoStatus = `Envoi des propositions… ${sent}`; paint();
           } catch (e) {
             if (/limite de/.test(e.message)) { full = true; break; }
+            if (e.local) continue; // écartée avant l'envoi : proposition suivante, sans attendre
             if (noteSendFailure(e)) { full = true; break; } // le site refuse le compte : on s'arrête là
           }
           await sleep(CONFIG.AUTO_SEND_DELAY_S * 1000);

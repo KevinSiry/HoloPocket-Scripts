@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.26
+// @version      3.27
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord (complétés par des paires de valeur équivalente quand il y en a peu), avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, et des pièces du compte une fois par heure, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
@@ -39,7 +39,7 @@
     SILENT_COOLDOWN_H: 72,   // 3 jours si le joueur a laissé expirer ta proposition sans répondre (probablement inactif)
     SILENT_LONG_COOLDOWN_H: 168, // 7 jours à partir de la 2e proposition laissée sans réponse
     ACCEPTED_COOLDOWN_H: 1,  // seulement 1 h si le joueur a accepté ta dernière proposition
-    CANCEL_AFTER_H: 5,       // une proposition sans réponse depuis 5 h est annulée automatiquement
+    CANCEL_AFTER_H: 2,       // une proposition sans réponse depuis 2 h est annulée automatiquement
     MIN_GAP_S: 0,            // délai minimum entre deux envois, en secondes (0 = aucun)
     MAX_PAIRS: 5,        // paires par proposition (10 cartes max au total, limite du site)
     MIN_PAIRS: 1,        // nombre minimum de paires pour proposer un échange (ex. 2 pour éviter les échanges à 1 carte)
@@ -345,7 +345,9 @@
   }
 
   // Joueurs déjà scannés sans résultat (mémoire locale) : on ne les rescanne pas avant SCAN_COOLDOWN_H
-  const SCAN_KEY = 'hp-trade-scanned-v2';
+  const SCAN_KEY = 'hp-trade-scanned-v3'; // v3 : mémoire repartie de zéro avec l'arrivée des offres en pièces
+  // Joueurs déjà scannés qui ont des doublons pour moi : gardés 30 min pour les offres en pièces, sans les rescanner
+  let buyBacklog = [];
   function readScanned() {
     let m = {};
     try { m = JSON.parse(localStorage.getItem(SCAN_KEY) || '{}'); } catch {}
@@ -666,7 +668,10 @@
     if (CONFIG.BUY_WITH_COINS && proposals.length < target && Date.now() >= lsNum(BUY_OFF_KEY)) {
       let budget = 0;
       try { budget = Math.floor(((await api('GET', '/me')).me || {}).balance || 0) - CONFIG.BUY_RESERVE - (log.coinsOut || 0); } catch {}
-      const cands = [...pool, ...coinOnly].filter((c) => !proposals.some((pr) => pr.partner === c.partner));
+      // Les joueurs vus aux passages précédents restent candidats 30 min : les places se libèrent au fil du temps
+      const known = new Set([...pool, ...coinOnly].map((c) => c.partner));
+      buyBacklog = [...pool, ...coinOnly, ...buyBacklog.filter((c) => !known.has(c.partner) && Date.now() - c.at < 30 * 60000)].map((c) => ({ ...c, at: c.at || Date.now() }));
+      const cands = buyBacklog.filter((c) => !proposals.some((pr) => pr.partner === c.partner) && !playerBlocked(c.partner, log));
       for (const c of cands) {
         if (proposals.length >= target || budget < 1) break;
         const buys = [];
@@ -680,6 +685,7 @@
         if (!buys.length) continue;
         for (const b of buys) wantedTaken.add(key(b.ask));
         budget -= pay;
+        buyBacklog = buyBacklog.filter((x) => x.partner !== c.partner);
         proposals.push({ partner: c.partner, pairs: [], buys, buy: true, pay, status: 'ready', askTotal: buys.reduce((t, b) => t + val(b.ask), 0), giveTotal: 0, coins: 0 });
       }
       // 4) Plus assez de pièces pour acheter quoi que ce soit : rôles inversés, mes doublons contre des pièces
@@ -744,7 +750,11 @@
         await api('POST', '/trades', { toUsername: prop.partner, offeredUserCardIds: [], requestedUserCardIds: prop.buys.map((b) => b.askId), offeredCoins: prop.pay, requestedCoins: 0 });
       } catch (e) {
         // Le site n'accepte pas une offre sans carte de mon côté : on n'insiste pas pendant 6 h
-        if (/au moins une carte|pi[eè]ces?|coins?/i.test(e.message)) lsSet(BUY_OFF_KEY, Date.now() + 6 * 3600000);
+        if (/au moins une carte|pi[eè]ces?|coins?/i.test(e.message)) {
+          lsSet(BUY_OFF_KEY, Date.now() + 6 * 3600000);
+          UI.toast(`<b>Offres en pièces</b> refusées par le site (${esc(e.message)}) : mises en pause 6 h`, { kind: 'error', ms: 15000 });
+          e.local = true; // ne suspend pas les autres échanges
+        }
         throw e;
       }
       writeLocal([...readLocal(), { to: prop.partner, at: Date.now() }]);

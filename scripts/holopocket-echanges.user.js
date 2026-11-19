@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.27
+// @version      3.28
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord (complétés par des paires de valeur équivalente quand il y en a peu), avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, et des pièces du compte une fois par heure, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
@@ -348,6 +348,24 @@
   const SCAN_KEY = 'hp-trade-scanned-v3'; // v3 : mémoire repartie de zéro avec l'arrivée des offres en pièces
   // Joueurs déjà scannés qui ont des doublons pour moi : gardés 30 min pour les offres en pièces, sans les rescanner
   let buyBacklog = [];
+  // Valeur d'une carte lue sur sa propre fiche de marché (une carte à la fois), gardée 10 min.
+  // Utilisée pour les échanges contre des pièces : la valeur affichée dans les listes d'échange n'est pas fiable.
+  // 0 = pas de valeur sûre → la carte n'entre pas dans une offre en pièces.
+  const valueCache = new Map();
+  async function marketValue(c) {
+    const k = key(c), hit = valueCache.get(k);
+    if (hit && Date.now() - hit.at < 10 * 60000) return hit.v;
+    let v = 0;
+    try {
+      const m = await api('GET', `/cards/${encodeURIComponent(c.id)}/market`);
+      const x = (m.versions || []).find((y) => !!y.reverse === !!c.reverse);
+      const st = (x && x.stats) || {}, avg = (st.sample || {}).average;
+      v = [st.value, avg].find((n) => typeof n === 'number' && n > 0) || 0;
+    } catch {}
+    valueCache.set(k, { at: Date.now(), v });
+    await sleep(CONFIG.DELAY / 2);
+    return v;
+  }
   function readScanned() {
     let m = {};
     try { m = JSON.parse(localStorage.getItem(SCAN_KEY) || '{}'); } catch {}
@@ -678,17 +696,19 @@
         let pay = 0;
         for (const a of c.ask) { // raretés hautes d'abord (ordre du scan)
           if (buys.length >= CONFIG.BUY_MAX_CARDS) break;
-          const price = Math.ceil(val(a));
-          if (!(price > 0) || wantedTaken.has(key(a)) || pay + price > Math.min(budget, CONFIG.BUY_MAX_PER_TRADE)) continue;
-          buys.push({ ask: a, askId: a.userCardIds[0] }); pay += price;
+          if (wantedTaken.has(key(a))) continue;
+          const price = Math.ceil(await marketValue(a)); // valeur lue sur la fiche de la carte, pas celle de la liste
+          if (!(price > 0) || pay + price > Math.min(budget, CONFIG.BUY_MAX_PER_TRADE)) continue;
+          buys.push({ ask: a, askId: a.userCardIds[0], price }); pay += price;
         }
         if (!buys.length) continue;
         for (const b of buys) wantedTaken.add(key(b.ask));
         budget -= pay;
         buyBacklog = buyBacklog.filter((x) => x.partner !== c.partner);
-        proposals.push({ partner: c.partner, pairs: [], buys, buy: true, pay, status: 'ready', askTotal: buys.reduce((t, b) => t + val(b.ask), 0), giveTotal: 0, coins: 0 });
+        proposals.push({ partner: c.partner, pairs: [], buys, buy: true, pay, status: 'ready', askTotal: pay, giveTotal: 0, coins: 0 });
       }
       // 4) Plus assez de pièces pour acheter quoi que ce soit : rôles inversés, mes doublons contre des pièces
+      // Estimation rapide (valeurs des listes) : sert seulement à savoir s'il reste de quoi acheter, pas à fixer un prix
       const prices = cands.flatMap((c) => c.ask).filter((a) => !wantedTaken.has(key(a))).map((a) => Math.ceil(val(a))).filter((v) => v > 0);
       const poor = budget < 1 || (prices.length > 0 && budget < Math.min(...prices));
       if (CONFIG.SELL_FOR_COINS && poor && proposals.length < target) {
@@ -702,12 +722,14 @@
           for (const g of c.give.slice().sort((x, y) => wished(y) - wished(x) || val(y) - val(x))) {
             if (gives.length >= CONFIG.SELL_MAX_CARDS) break;
             const k = key(g), used = giveUsed.get(k) || 0;
-            if (!(val(g) > 0) || isBlocked(k) || used >= spareOf(g) || gives.some((x) => key(x.give) === k)) continue;
-            gives.push({ give: g, giveId: g.userCardIds[used], wished: !!wished(g) });
+            if (isBlocked(k) || used >= spareOf(g) || gives.some((x) => key(x.give) === k)) continue;
+            const price = Math.round(await marketValue(g)); // valeur lue sur la fiche de la carte
+            if (!(price > 0)) continue;
+            gives.push({ give: g, giveId: g.userCardIds[used], wished: !!wished(g), price });
           }
           if (!gives.length) continue;
           for (const x of gives) giveUsed.set(key(x.give), (giveUsed.get(key(x.give)) || 0) + 1);
-          const total = gives.reduce((t, x) => t + val(x.give), 0);
+          const total = gives.reduce((t, x) => t + x.price, 0);
           proposals.push({ partner: c.partner, pairs: [], gives, sell: true, status: 'ready', askTotal: 0, giveTotal: total, coins: Math.max(1, Math.round(total)) });
         }
       }
@@ -1131,8 +1153,8 @@
       <div style="margin:10px 0 0;padding:10px;border-radius:12px;background:var(--color-panel-2,#242428);border:2px solid ${pr.status === 'sent' ? '#22c55e' : pr.status === 'error' ? '#ef4444' : 'var(--color-line,#313136)'}">
         <div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:6px"><b>${esc(pr.partner)} <span style="font-weight:500;color:var(--color-muted,#9d9da3);font-size:12px">· ${pr.sell ? `${pr.gives.length} de tes doublons contre des pièces` : pr.buy ? `${pr.buys.length} carte${pr.buys.length > 1 ? 's' : ''} contre des pièces` : `${pr.pairs.length} carte${pr.pairs.length > 1 ? 's' : ''} de chaque côté`}</span></b>
           <span style="color:var(--color-muted,#9d9da3);font-size:12px;white-space:nowrap">reçois ${pr.askTotal}${pr.coins ? ` + ${pr.coins} pièces` : ''} · ${pr.buy ? `paies ${pr.pay} pièces` : `donnes ${pr.giveTotal}`}</span></div>
-        ${(pr.gives || []).map((x) => `<div style="margin:3px 0;font-size:13px"><span style="color:var(--color-brand,#ffd60a)">Tu donnes</span> ${cardLabel(x.give)} <small style="color:var(--color-muted,#9d9da3)">· ${Math.round(val(x.give))} pièces${x.wished ? ' · il la recherche' : ''}</small></div>`).join('')}
-        ${(pr.buys || []).map((b) => `<div style="margin:3px 0;font-size:13px"><span style="color:#4ade80">Tu reçois</span> ${cardLabel(b.ask)} <small style="color:var(--color-muted,#9d9da3)">· ${Math.ceil(val(b.ask))} pièces</small></div>`).join('')}
+        ${(pr.gives || []).map((x) => `<div style="margin:3px 0;font-size:13px"><span style="color:var(--color-brand,#ffd60a)">Tu donnes</span> ${cardLabel(x.give)} <small style="color:var(--color-muted,#9d9da3)">· ${x.price} pièces${x.wished ? ' · il la recherche' : ''}</small></div>`).join('')}
+        ${(pr.buys || []).map((b) => `<div style="margin:3px 0;font-size:13px"><span style="color:#4ade80">Tu reçois</span> ${cardLabel(b.ask)} <small style="color:var(--color-muted,#9d9da3)">· ${b.price} pièces</small></div>`).join('')}
         ${pr.pairs.map((x) => `<div style="margin:3px 0;font-size:13px"><span style="color:#4ade80">Tu reçois</span> ${cardLabel(x.ask)}<br><span style="color:var(--color-brand,#ffd60a)">Tu donnes</span> ${cardLabel(x.give)}${x.wished ? ' <small style="color:#4ade80">· il la recherche</small>' : ''}${x.cross ? ' <small style="color:var(--color-muted,#9d9da3)">· valeur équivalente, rareté différente</small>' : ''}</div>`).join('<hr style="border:0;border-top:1px solid var(--color-line,#313136);margin:6px 0">')}
         <div style="margin-top:9px">
           ${pr.status === 'ready' ? btn('Envoyer', 'send', i) + btn('Ignorer', 'skip', i, true) : ''}

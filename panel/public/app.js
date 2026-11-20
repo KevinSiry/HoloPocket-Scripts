@@ -358,6 +358,12 @@ async function accountCard(bot, globalChoice) {
   if (s.account) { coins.append(el('b', null, num(s.account.balance)), el('span', null, ' pièces')); }
   else coins.append(el('span', 'bad', 'Session perdue, reconnexion en cours'));
   card.append(coins);
+  if (s.collection) {
+    const col = el('p', 'collection');
+    col.append(el('span', null, `Collection ${num(s.collection.owned)} sur ${num(s.collection.total)}`));
+    if (typeof bot.newToday === 'number') col.append(el('b', bot.newToday > 0 ? 'up' : null, `${signed(bot.newToday)} aujourd’hui`));
+    card.append(col);
+  }
   const meters = el('div', 'meters');
   if (s.account) meters.append(meter('Énergie', s.account.energy.stock, s.account.energy.max));
   meters.append(meter('Échanges', s.trades.open, s.trades.max), meter('Ventes', s.sales.selling, s.sales.max));
@@ -377,27 +383,41 @@ async function accountCard(bot, globalChoice) {
   return card;
 }
 
+let alertSig = null, alertsOpen = false;
 function renderAlerts(alerts) {
   const box = $('alerts');
+  const sig = alerts.map((a) => `${a.key}|${a.text}`).join('\n') + alertsOpen;
+  if (sig === alertSig) return; // rien de neuf : on ne redessine pas
+  alertSig = sig;
   box.replaceChildren();
-  for (const a of alerts) {
+  const MAX = 3;
+  const shown = alertsOpen ? alerts : alerts.slice(0, MAX);
+  for (const a of shown) {
     const row = el('div', `alert ${a.level}`);
     const x = el('button', 'alert-x', '×');
     x.type = 'button'; x.title = 'Fermer cette alerte'; x.setAttribute('aria-label', 'Fermer cette alerte');
-    x.addEventListener('click', () => { row.remove(); api('POST', '/api/alerts/dismiss', { key: a.key }).catch(() => {}); });
+    x.addEventListener('click', () => { row.remove(); alertSig = null; api('POST', '/api/alerts/dismiss', { key: a.key }).catch(() => {}); });
     const msg = el('span', null);
     msg.append(el('b', null, a.bot), ` ${a.text} `, profileLink(a.bot, 'profile inline-link'));
     row.append(msg, x);
     box.append(row);
   }
   if (alerts.length > 1) {
+    const foot = el('div', 'alert-foot');
+    if (alerts.length > MAX) {
+      const more = el('button', 'ghost small', alertsOpen ? 'Réduire' : `Afficher les ${alerts.length - MAX} autres alertes`);
+      more.type = 'button'; more.setAttribute('aria-expanded', String(alertsOpen));
+      more.addEventListener('click', () => { alertsOpen = !alertsOpen; renderAlerts(alerts); });
+      foot.append(more);
+    }
     const all = el('button', 'ghost small dismiss-all', 'Tout fermer');
     all.type = 'button';
-    all.addEventListener('click', () => { box.replaceChildren(); api('POST', '/api/alerts/dismiss', { all: true, keys: alerts.map((a) => a.key) }).catch(() => {}); });
-    box.append(all);
+    all.addEventListener('click', () => { box.replaceChildren(); alertSig = null; api('POST', '/api/alerts/dismiss', { all: true, keys: alerts.map((a) => a.key) }).catch(() => {}); });
+    foot.append(all);
+    box.append(foot);
   }
 }
-
+const signed = (n) => `${n > 0 ? '+' : ''}${num(n)}`;
 function renderSummary(d) {
   const box = $('summary');
   const live = d.bots.filter((b) => !b.disabled);
@@ -410,6 +430,8 @@ function renderSummary(d) {
   cell(live.length > 1 ? 'comptes en ligne' : 'compte en ligne', `${online}/${live.length}`, live.length && online < live.length);
   cell('pièces sur la flotte', num(coins));
   cell(trades > 1 ? 'échanges ouverts' : 'échange ouvert', num(trades));
+  const fresh = d.bots.map((b) => b.newToday).filter((x) => typeof x === 'number');
+  cell('nouvelles cartes aujourd’hui', fresh.length ? signed(fresh.reduce((t, x) => t + x, 0)) : '–');
   cell(n > 1 ? 'alertes' : 'alerte', String(n), n > 0);
 }
 
@@ -450,11 +472,42 @@ function logBody(l) {
   }
   return body;
 }
+// Types de lignes du journal, d'après l'étiquette en début de message
+const LOG_TYPES = [
+  ['boosters', 'Boosters', /^(Booster ouvert|Carte de valeur|Auto-ouverture|Événement)/i],
+  ['trades', 'Échanges', /^(Auto-échanges|Échanges?\b|Échange prioritaire|Offres en pièces|Refus impossible)/i],
+  ['market', 'Marché', /^(Auto-vente|Achat-revente|Cartes manquantes|Recyclage|Vente|Enchère|Marché)/i],
+  ['system', 'Système', null], // tout le reste : démarrage, session, réglages du panel, mises à jour
+];
+const logType = (l) => { const t = String(l.text).replace(/^›\s*/, ''); const hit = LOG_TYPES.find(([, , re]) => re && re.test(t)); return hit ? hit[0] : 'system'; };
+let logTypes = new Set(LOG_TYPES.map((t) => t[0]));
+try { const saved = JSON.parse(localStorage.getItem('hp-panel-log-types') || 'null'); if (Array.isArray(saved) && saved.length) logTypes = new Set(saved.filter((k) => LOG_TYPES.some((t) => t[0] === k))); } catch {}
+function renderLogTypes(lines) {
+  const box = $('logTypes');
+  const counts = Object.fromEntries(LOG_TYPES.map((t) => [t[0], 0]));
+  for (const l of lines) counts[logType(l)]++;
+  const all = logTypes.size === LOG_TYPES.length;
+  const mk = (label, on, onClick, n) => {
+    const b = el('button', on ? 'tog on' : 'tog', label); b.type = 'button'; b.setAttribute('aria-pressed', String(on));
+    if (n != null) b.append(el('span', 'tog-n', num(n)));
+    b.addEventListener('click', onClick); return b;
+  };
+  const set = (next) => { logTypes = next; try { localStorage.setItem('hp-panel-log-types', JSON.stringify([...next])); } catch {} refreshLogs(true); };
+  box.replaceChildren(
+    mk('Tout', all, () => set(new Set(LOG_TYPES.map((t) => t[0]))), lines.length),
+    // Un clic sur un type quand tout est affiché : ce type seul. Ensuite, chaque clic l'ajoute ou le retire.
+    ...LOG_TYPES.map(([k, label]) => mk(label, !all && logTypes.has(k), () => {
+      if (all) return set(new Set([k]));
+      const next = new Set(logTypes); if (next.has(k)) next.delete(k); else next.add(k);
+      set(next.size ? next : new Set(LOG_TYPES.map((t) => t[0])));
+    }, counts[k])),
+  );
+}
 let logSig = '';
 function renderLogs(lines) {
   const ol = $('logList');
   // Rien de neuf : on ne redessine pas (garde la sélection de texte et le défilement)
-  const sig = `${lines.length}|${lines.length ? `${lines[lines.length - 1].bot}#${lines[lines.length - 1].id}` : ''}`;
+  const sig = `${[...logTypes].join(',')}|${lines.length}|${lines.length ? `${lines[lines.length - 1].bot}#${lines[lines.length - 1].id}` : ''}`;
   if (sig === logSig) return;
   logSig = sig;
   ol.replaceChildren();
@@ -465,7 +518,7 @@ function renderLogs(lines) {
     li.append(t, el('b', null, l.bot), logBody(l));
     ol.append(li);
   }
-  if (!lines.length) ol.append(el('li', 'muted', 'Aucune ligne.'));
+  if (!lines.length) ol.append(el('li', 'muted', 'Aucune ligne pour ces filtres.'));
 }
 
 // ───────── Onglet Chances : probabilité de nouvelle carte par booster, pour un compte ─────────
@@ -515,6 +568,89 @@ async function refreshChances(fresh) {
   } catch (e) { $('chStamp').textContent = `Erreur : ${e.message}`; $('chList').replaceChildren(); }
 }
 
+// ───────── Onglet Évolution : nouvelles cartes par jour ─────────
+const SVG = (tag, attrs = {}, text) => { const n = document.createElementNS('http://www.w3.org/2000/svg', tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); if (text != null) n.textContent = text; return n; };
+const dayLabel = (iso, long) => new Date(`${iso}T12:00:00`).toLocaleDateString('fr-FR', long ? { weekday: 'long', day: 'numeric', month: 'long' } : { day: 'numeric', month: 'numeric' });
+// Graduation « ronde » juste au-dessus du maximum
+const niceMax = (v) => { if (v <= 4) return 4; const p = 10 ** Math.floor(Math.log10(v)); const m = v / p; return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p; };
+function evolutionSeries(d, name) {
+  const names = name ? [name] : Object.keys(d.bots);
+  return d.days.map((day, i) => {
+    const pts = names.map((n) => (d.bots[n] || [])[i]).filter(Boolean);
+    return pts.length ? { day, gain: pts.reduce((t, p) => t + (p.gain || 0), 0), owned: pts.reduce((t, p) => t + p.owned, 0), total: pts.reduce((t, p) => t + (p.total || 0), 0) } : { day, gain: null };
+  });
+}
+function renderEvolution(d) {
+  const name = $('evBot').value;
+  const rows = evolutionSeries(d, name);
+  const known = rows.filter((r) => r.gain != null);
+  const who = name || (Object.keys(d.bots).length > 1 ? 'tous les comptes' : Object.keys(d.bots)[0] || '');
+  // Chiffres clés
+  const stats = $('evStats'); stats.replaceChildren();
+  const cell = (k, v) => { const c = el('div', 'cell'); c.append(el('b', null, v), el('span', null, k)); stats.append(c); };
+  const today = rows[rows.length - 1], week = rows.slice(-7).filter((r) => r.gain != null);
+  cell('nouvelles cartes aujourd’hui', today && today.gain != null ? signed(today.gain) : '–');
+  cell('sur les 7 derniers jours', week.length ? signed(week.reduce((t, r) => t + r.gain, 0)) : '–');
+  const last = known[known.length - 1];
+  cell(last && last.total ? `cartes possédées sur ${num(last.total)}` : 'cartes possédées', last ? num(last.owned) : '–');
+  $('evTitle').textContent = `Nouvelles cartes par jour, ${who}`;
+  const box = $('evChart'); box.replaceChildren();
+  if (!known.length) { box.append(el('p', 'empty', 'Pas encore de relevé. Le suivi démarre dès qu’un compte est en ligne : le premier jour sert de point de départ, l’évolution apparaît à partir du lendemain.')); $('evTable').replaceChildren(); return; }
+  // Graphique en barres : une barre par jour, valeurs négatives sous la ligne de base
+  const W = 760, H = 260, L = 40, R = 8, T = 12, B = 28;
+  const hi = niceMax(Math.max(1, ...known.map((r) => r.gain))), lo = Math.min(0, ...known.map((r) => r.gain));
+  const loN = lo < 0 ? -niceMax(-lo) : 0;
+  const y = (v) => T + (H - T - B) * (1 - (v - loN) / (hi - loN));
+  const step = (W - L - R) / rows.length, bw = Math.max(2, Math.min(28, step - 2));
+  const svg = SVG('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `Nouvelles cartes par jour pour ${who}, sur ${rows.length} jours. Les chiffres sont dans le tableau sous le graphique.` });
+  for (const v of [...new Set([loN, 0, hi / 2, hi])]) {
+    svg.append(SVG('line', { x1: L, x2: W - R, y1: y(v), y2: y(v), class: v === 0 ? 'axis' : 'grid' }));
+    svg.append(SVG('text', { x: L - 6, y: y(v) + 4, class: 'tick', 'text-anchor': 'end' }, num(v)));
+  }
+  const every = Math.ceil(rows.length / 10);
+  const tip = el('div', 'chart-tip'); tip.hidden = true;
+  const show = (r, cx) => {
+    tip.replaceChildren(el('b', null, r.gain == null ? 'Pas de relevé' : `${signed(r.gain)} nouvelle${Math.abs(r.gain) > 1 ? 's' : ''} carte${Math.abs(r.gain) > 1 ? 's' : ''}`), el('span', null, dayLabel(r.day, true)), ...(r.gain != null ? [el('span', null, `${num(r.owned)} possédées`)] : []));
+    tip.hidden = false;
+    tip.style.left = `${Math.max(12, Math.min(88, (cx / W) * 100))}%`;
+  };
+  rows.forEach((r, i) => {
+    const cx = L + step * i + step / 2;
+    if (i % every === 0 || i === rows.length - 1) svg.append(SVG('text', { x: cx, y: H - 8, class: 'tick', 'text-anchor': 'middle' }, dayLabel(r.day)));
+    if (r.gain) {
+      const y0 = y(0), y1 = y(r.gain), top = Math.min(y0, y1), h = Math.max(2, Math.abs(y1 - y0)), rad = Math.min(4, bw / 2, h);
+      const x = cx - bw / 2;
+      // Extrémité arrondie côté valeur, pied droit sur la ligne de base
+      const dPath = r.gain > 0
+        ? `M${x},${y0}V${top + rad}Q${x},${top} ${x + rad},${top}H${x + bw - rad}Q${x + bw},${top} ${x + bw},${top + rad}V${y0}Z`
+        : `M${x},${y0}V${top + h - rad}Q${x},${top + h} ${x + rad},${top + h}H${x + bw - rad}Q${x + bw},${top + h} ${x + bw},${top + h - rad}V${y0}Z`;
+      svg.append(SVG('path', { d: dPath, class: r.gain > 0 ? 'bar' : 'bar neg' }));
+    }
+    // Zone de survol sur toute la hauteur du jour (plus large que la barre), atteignable au clavier
+    const hit = SVG('rect', { x: L + step * i, y: T, width: step, height: H - T - B, class: 'hit', tabindex: '0', 'aria-label': `${dayLabel(r.day, true)} : ${r.gain == null ? 'pas de relevé' : `${signed(r.gain)} nouvelles cartes, ${num(r.owned)} possédées`}` });
+    hit.addEventListener('mouseenter', () => show(r, cx)); hit.addEventListener('focus', () => show(r, cx));
+    hit.addEventListener('mouseleave', () => { tip.hidden = true; }); hit.addEventListener('blur', () => { tip.hidden = true; });
+    svg.append(hit);
+  });
+  const inner = el('div', 'chart-in'); inner.append(svg, tip); // largeur minimale : sur téléphone le graphique défile au lieu de rétrécir
+  box.append(inner);
+  requestAnimationFrame(() => { box.scrollLeft = box.scrollWidth; }); // les jours récents d'abord
+  // Tableau des mêmes chiffres
+  const table = el('table', 'ch-table');
+  const head = el('tr'); for (const [t, cls] of [['Jour', ''], ['Nouvelles cartes', 'num'], ['Cartes possédées', 'num']]) { const th = el('th', cls, t); th.scope = 'col'; head.append(th); }
+  const thead = el('thead'); thead.append(head);
+  const tbody = el('tbody');
+  for (const r of known.slice().reverse()) { const tr = el('tr'); const th = el('th', 'ch-name', dayLabel(r.day, true)); th.scope = 'row'; tr.append(th, el('td', 'num', signed(r.gain)), el('td', 'num', num(r.owned))); tr.querySelectorAll('td.num')[0].dataset.label = 'Nouvelles'; tr.querySelectorAll('td.num')[1].dataset.label = 'Possédées'; tbody.append(tr); }
+  table.append(thead, tbody);
+  $('evTable').replaceChildren(table);
+}
+async function refreshEvolution() {
+  if ($('evolution').hidden) return;
+  try { renderEvolution(await api('GET', `/api/stats?days=${encodeURIComponent($('evRange').value)}`)); }
+  catch (e) { $('evChart').replaceChildren(el('p', 'empty', `Relevé illisible : ${e.message}`)); }
+}
+
+let accountsSig = '', accountsAt = 0;
 async function refresh(force) {
   if (busy && !force) return;
   try {
@@ -530,7 +666,11 @@ async function refresh(force) {
     // Pas de reconstruction pendant qu'un menu ou un champ est utilisé (sinon la liste se referme)
     const typing = document.activeElement && ($('accounts').contains(document.activeElement) || $('toolbar').contains(document.activeElement)) && (document.activeElement.tagName === 'SELECT' || (document.activeElement.tagName === 'INPUT' && /^(text|password)$/.test(document.activeElement.type)));
     // …ni pendant qu'une liste de booster est ouverte
-    if (!busy && !typing && !document.querySelector('.combo.open')) {
+    // Rien n'a changé depuis le dernier affichage : on ne reconstruit pas les cartes (au plus une fois par minute pour les durées affichées)
+    const sig = JSON.stringify([d.bots.map((b) => ({ ...b, status: b.status && { ...b.status, at: 0 } })), d.booster, manage, openSets.at]);
+    const same = !force && sig === accountsSig && Date.now() - accountsAt < 60000;
+    if (!busy && !typing && !same && !document.querySelector('.combo.open')) {
+      accountsSig = sig; accountsAt = Date.now();
       $('toolbar').replaceChildren(globalBar(d.booster.global, d.bots), ...(manage ? [addBar()] : []));
       $('accounts').replaceChildren(...(resolved.length ? resolved : [el('p', 'empty', manage ? 'Aucun compte pour le moment. Crée-en un ou ajoute un compte existant avec les boutons ci-dessus.' : 'Aucun bot détecté.')]));
     }
@@ -540,6 +680,13 @@ async function refresh(force) {
       const keep = chSel.value;
       chSel.replaceChildren(...online.map((n) => { const o = el('option', null, n); o.value = n; return o; }));
       if (online.includes(keep)) chSel.value = keep; else if (!$('chances').hidden) refreshChances(false);
+    }
+    // Comptes proposés dans l'onglet Évolution
+    const evSel = $('evBot'), evNames = d.bots.map((b) => b.name);
+    if ([...evSel.options].slice(1).map((o) => o.value).join('|') !== evNames.join('|')) {
+      const keep = evSel.value;
+      evSel.replaceChildren(evSel.options[0], ...evNames.map((n) => { const o = el('option', null, n); o.value = n; return o; }));
+      evSel.value = evNames.includes(keep) ? keep : '';
     }
     // Comptes proposés dans le journal : suivent les ajouts et suppressions
     const sel = $('logBot'), names = d.bots.map((b) => b.name);
@@ -557,11 +704,15 @@ async function refreshLogs(reset) {
   const q = new URLSearchParams();
   if ($('logBot').value) q.set('bot', $('logBot').value);
   const d = await api('GET', `/api/logs?${q}`);
-  renderLogs($('logWarn').checked ? d.lines.filter((l) => l.level !== 'info') : d.lines);
+  const base = $('logWarn').checked ? d.lines.filter((l) => l.level !== 'info') : d.lines;
+  renderLogTypes(base);
+  const shown = base.filter((l) => logTypes.has(logType(l)));
+  $('logCount').textContent = shown.length === base.length ? `${num(shown.length)} ligne${shown.length > 1 ? 's' : ''}` : `${num(shown.length)} sur ${num(base.length)} lignes`;
+  renderLogs(shown);
 }
 
 const TABS = [...document.querySelectorAll('.tab')];
-const HASH = { accounts: '', logs: '#journal', chances: '#chances' };
+const HASH = { accounts: '', logs: '#journal', chances: '#chances', evolution: '#evolution' };
 function showTab(b, focus) {
   for (const x of TABS) { x.classList.toggle('on', x === b); x.setAttribute('aria-selected', String(x === b)); x.tabIndex = x === b ? 0 : -1; }
   if (focus) b.focus();
@@ -571,7 +722,9 @@ function showTab(b, focus) {
   $('summary').hidden = b.dataset.tab !== 'accounts';
   $('logs').hidden = b.dataset.tab !== 'logs';
   $('chances').hidden = b.dataset.tab !== 'chances';
+  $('evolution').hidden = b.dataset.tab !== 'evolution';
   if (b.dataset.tab === 'chances') refreshChances(false);
+  if (b.dataset.tab === 'evolution') refreshEvolution();
   if (b.dataset.tab === 'logs') logSig = '';
   refresh(true);
 }
@@ -589,10 +742,13 @@ $('chBot').addEventListener('change', () => { $('chList').replaceChildren(); ref
 $('chSort').addEventListener('change', () => refreshChances(false));
 $('chRefresh').addEventListener('click', () => refreshChances(true));
 $('logWarn').addEventListener('change', () => refreshLogs(true));
+$('evBot').addEventListener('change', () => refreshEvolution());
+$('evRange').addEventListener('change', () => refreshEvolution());
 $('logout').addEventListener('click', async () => { await api('POST', '/api/logout').catch(() => {}); location.href = '/login'; });
 // Onglet ouvert au chargement : celui de l'adresse (#journal, #chances)
 const startTab = TABS.find((b) => HASH[b.dataset.tab] && HASH[b.dataset.tab] === location.hash);
 if (startTab) showTab(startTab); else { TABS.forEach((x, i) => { x.tabIndex = i ? -1 : 0; }); refresh(true); }
 // Pas d'appels quand la page est en arrière-plan ; mise à jour immédiate au retour
 setInterval(() => { if (!document.hidden) refresh(); }, 5000);
+setInterval(() => { if (!document.hidden && !$('evolution').hidden) refreshEvolution(); }, 5 * 60000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });

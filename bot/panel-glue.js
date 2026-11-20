@@ -32,8 +32,8 @@ function readSiteState() {
     try { const r = await fetch('/api' + p, { credentials: 'same-origin' }); return r.ok ? await r.json() : null; } catch { return null; }
   };
   const ls = (k) => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } };
-  // La liste des séries bouge très rarement : relue au plus toutes les 10 min
-  const cached = window.__hpSets && Date.now() - window.__hpSets.at < 600000;
+  // La liste des séries (favoris, cartes possédées) : relue au plus toutes les 5 min
+  const cached = window.__hpSets && Date.now() - window.__hpSets.at < 300000;
   return Promise.all([j('/me'), j('/trades/sent'), j('/market/counts'), cached ? window.__hpSets.v : j('/sets')])
     .then(([me, sent, counts, sets]) => { if (!cached && sets) window.__hpSets = { at: Date.now(), v: sets }; return ({ me, sent, counts, sets, flip: ls('hp-flip-state'), beat: ls('hp-flip-beat'), lastPack: ls('hp-booster-last') }); });
 }
@@ -97,6 +97,12 @@ function readSets() {
  *   name, startedAt,              identité du bot
  * }
  */
+function collectionOf(sets) {
+  const list = arr(sets).filter((s) => typeof s.owned === 'number' && typeof s.cardCount === 'number');
+  if (!list.length) return null;
+  return { owned: list.reduce((t, s) => t + s.owned, 0), total: list.reduce((t, s) => t + s.cardCount, 0) };
+}
+
 function createGlue(deps) {
   const { page, ctx, cfg, state, file, baseScripts, buildToggles, setLS, getScripts, setScripts, fetchScripts, load, logs, log } = deps;
   const now = deps.now || (() => Date.now());
@@ -129,6 +135,8 @@ function createGlue(deps) {
         energy: { stock: packs.stock ?? null, max: packs.max ?? null, fullSince: iso(watch.energyFullSince) },
         quarantined: !!me.quarantined,
       } : null,
+      // Collection : cartes différentes possédées sur l'ensemble des séries (sert au compteur de nouvelles cartes du panel)
+      collection: collectionOf(d && d.sets),
       trades: { open, max: TRADES_MAX, fullSince: iso(watch.tradesFullSince) },
       sales: { selling: d && d.counts ? d.counts.selling ?? null : null, max: d && d.counts ? d.counts.maxSelling ?? null : null },
       scripts: pc.KNOWN_SCRIPTS.map((n) => {

@@ -59,7 +59,7 @@ nav { display: flex; gap: .25rem; margin-right: auto; background: var(--sleeve);
 main, #alerts { max-width: 1180px; margin: 0 auto; padding: 0 1rem; }
 
 /* Bande de la flotte */
-.summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 1rem; background: var(--sleeve); border: 1px solid var(--edge); border-radius: var(--r-lg); }
+.summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-top: 1rem; background: var(--sleeve); border: 1px solid var(--edge); border-radius: var(--r-lg); }
 .cell { padding: .75rem 1rem; display: flex; flex-direction: column; }
 .cell + .cell { border-left: 1px solid var(--edge); }
 .cell b { font-size: 26px; font-weight: 750; line-height: 1.1; letter-spacing: -.02em; }
@@ -207,8 +207,10 @@ body.login { display: grid; place-items: center; min-height: 100vh; padding: 1re
 
 @media (max-width: 720px) {
   .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .cell:nth-child(3) { border-left: 0; }
+  .cell:nth-child(odd) { border-left: 0; }
   .cell:nth-child(n+3) { border-top: 1px solid var(--edge); }
+  .cell:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .summary.three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   #logList li { grid-template-columns: 4.6rem 1fr; }
   #logList li > span:last-child { grid-column: 1 / -1; }
 }
@@ -279,4 +281,46 @@ body.login { display: grid; place-items: center; min-height: 100vh; padding: 1re
   .ch-table td.num { text-align: left; color: var(--mist); font-size: 12.5px; }
   .ch-table td.num:last-child { grid-column: 1 / -1; }
   .ch-table td.num::before { content: attr(data-label) " : "; }
+}
+
+/* Compteur de collection sur la carte d'un compte */
+.collection { margin: -.35rem 0 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: .2rem .6rem; color: var(--mist); font-size: 13px; }
+.collection b { color: var(--paper); font-weight: 650; }
+.collection b.up { color: var(--ok); }
+
+/* Alertes : pied de liste (afficher la suite, tout fermer) */
+.alert-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; }
+
+/* Journal : filtres par type */
+.types { display: flex; flex-wrap: wrap; gap: .4rem; margin: -.25rem 0 .9rem; }
+.tog-n { margin-left: .4rem; color: var(--mist); font-size: 12px; font-variant-numeric: tabular-nums; }
+#logCount { margin: 0; }
+
+/* Onglet Évolution */
+.summary.three { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 0; }
+.chart { position: relative; margin: 1rem 0; padding: 1rem 1rem .5rem; background: var(--sleeve); border: 1px solid var(--edge); border-radius: var(--r-lg); }
+.chart figcaption { font-weight: 650; margin-bottom: .5rem; }
+#evChart { overflow-x: auto; }
+.chart-in { position: relative; min-width: 560px; }
+#evChart svg { display: block; width: 100%; height: auto; }
+#evChart .grid { stroke: var(--edge); stroke-width: 1; stroke-dasharray: 2 4; }
+#evChart .axis { stroke: var(--mist); stroke-width: 1; opacity: .6; }
+#evChart .tick { fill: var(--mist); font-size: 11px; font-variant-numeric: tabular-nums; }
+#evChart .bar { fill: #4f8ff0; }
+#evChart .bar.neg { fill: var(--mist); }
+#evChart .hit { fill: transparent; cursor: default; outline: none; }
+#evChart .hit:hover, #evChart .hit:focus-visible { fill: rgba(237, 240, 247, .07); }
+.chart-tip { position: absolute; top: 0; transform: translateX(-50%); display: grid; gap: .1rem; padding: .45rem .65rem; background: var(--binder); border: 1px solid var(--edge); border-radius: var(--r-sm); font-size: 12px; color: var(--mist); white-space: nowrap; pointer-events: none; box-shadow: 0 8px 20px rgba(0, 0, 0, .4); }
+.chart-tip b { color: var(--paper); font-size: 13px; }
+.ev-table { margin-bottom: 1rem; }
+.ev-table > summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; color: var(--mist); font-size: 13px; }
+.ev-table .ch-table { margin: .5rem 0 0; }
+@media (max-width: 720px) {
+  .summary.three { grid-template-columns: 1fr; }
+  .summary.three .cell { flex-direction: row; align-items: baseline; gap: .6rem; border-left: 0; grid-column: auto; }
+  .summary.three .cell + .cell { border-top: 1px solid var(--edge); }
+  .summary.three .cell b { font-size: 22px; min-width: 4.5rem; }
+}
+@media (max-width: 520px) {
+  nav .tab { padding: .3rem .35rem; font-size: 14px; min-width: 0; }
 }

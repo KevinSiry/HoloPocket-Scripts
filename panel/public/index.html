@@ -15,6 +15,7 @@
     <button data-tab="accounts" class="tab on" role="tab" aria-selected="true" id="tab-accounts" aria-controls="accounts">Comptes</button>
     <button data-tab="logs" class="tab" role="tab" aria-selected="false" id="tab-logs" aria-controls="logs">Journal</button>
     <button data-tab="chances" class="tab" role="tab" aria-selected="false" id="tab-chances" aria-controls="chances">Chances</button>
+    <button data-tab="evolution" class="tab" role="tab" aria-selected="false" id="tab-evolution" aria-controls="evolution">Évolution</button>
   </nav>
   <span id="stamp" class="muted" role="status"></span>
   <button id="logout" class="ghost">Déconnexion</button>
@@ -28,7 +29,9 @@
     <div class="bar">
       <select id="logBot" aria-label="Compte"><option value="">Tous les comptes</option></select>
       <label><input type="checkbox" id="logWarn"> Alertes seulement</label>
+      <span id="logCount" class="muted" role="status"></span>
     </div>
+    <div id="logTypes" class="types" role="group" aria-label="Types de lignes affichés"></div>
     <ol id="logList"></ol>
   </section>
   <section id="chances" role="tabpanel" aria-labelledby="tab-chances" hidden>
@@ -44,6 +47,23 @@
     </div>
     <p class="muted ch-help">Chance d’obtenir au moins une nouvelle carte en ouvrant un booster de la série, d’après la collection du compte. Une reverse manquante compte comme une nouvelle carte.</p>
     <div id="chList"></div>
+  </section>
+  <section id="evolution" role="tabpanel" aria-labelledby="tab-evolution" hidden>
+    <div class="bar">
+      <select id="evBot" aria-label="Compte"><option value="">Tous les comptes</option></select>
+      <select id="evRange" aria-label="Période">
+        <option value="14">14 derniers jours</option>
+        <option value="30" selected>30 derniers jours</option>
+        <option value="90">90 derniers jours</option>
+      </select>
+    </div>
+    <div id="evStats" class="summary three" aria-label="Résumé"></div>
+    <figure class="chart">
+      <figcaption id="evTitle"></figcaption>
+      <div id="evChart"></div>
+    </figure>
+    <details class="ev-table"><summary>Voir les chiffres jour par jour</summary><div id="evTable"></div></details>
+    <p class="muted ch-help">Une nouvelle carte est une carte que le compte ne possédait pas encore, quelle que soit sa provenance (booster, échange, achat). Le chiffre du jour est un gain net : une carte donnée en dernier exemplaire est décomptée. Le relevé se met à jour toutes les 5 minutes environ.</p>
   </section>
 </main>
 <dialog id="dlg"><form method="dialog" id="dlgForm"><h2 id="dlgTitle"></h2><p id="dlgText"></p><output id="dlgSecret" hidden></output><div class="actions" id="dlgActions"></div></form></dialog>

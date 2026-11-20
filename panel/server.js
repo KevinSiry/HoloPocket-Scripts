@@ -6,6 +6,7 @@ const auth = require('./lib/auth');
 const { parseBots, createBots } = require('./lib/bots');
 const { computeAlerts, createAlertTracker } = require('./lib/alerts');
 const { createStore, createReconciler, valid: validChoice } = require('./lib/booster');
+const { createStats } = require('./lib/stats');
 const { createVault } = require('./lib/vault');
 const { createAccountStore } = require('./lib/accounts');
 const { createFleetClient } = require('./lib/fleet-client');
@@ -33,7 +34,12 @@ function createApp(opts) {
   const file = (f) => { if (!files.has(f)) files.set(f, fs.readFileSync(path.join(PUBLIC, f), 'utf8')); return files.get(f); };
   // Une seule lecture des bots à la fois : plusieurs onglets ouverts et la boucle de fond partagent la même
   let inflight = null;
-  const refreshAll = () => inflight || (inflight = bots.refreshAll().finally(() => { inflight = null; }));
+  const stats = opts.stats || createStats(null, { now });
+  // Chaque lecture des bots alimente le suivi de collection (nouvelles cartes par jour)
+  const refreshAll = () => inflight || (inflight = bots.refreshAll().then((list) => {
+    for (const b of list) { const c = b.online && b.status && b.status.collection; if (c) stats.record(b.name, c.owned, c.total); }
+    return list;
+  }).finally(() => { inflight = null; }));
   const tracker = createAlertTracker();
   const rec = opts.reconciler || createReconciler({ store, push: (n, p) => bots.config(n, p) });
   const throttle = opts.throttle || auth.createThrottle({ now });
@@ -92,7 +98,7 @@ function createApp(opts) {
         const list = await refreshAll();
         await rec.run(list);
         const errs = rec.errors();
-        const view = (b, extra = {}) => ({ name: b.name, online: b.online, lastSeen: b.lastSeen ? new Date(b.lastSeen).toISOString() : null, status: b.status, error: b.error || null, booster: { choice: store.choice(b.name), error: errs[b.name] || null }, ...extra });
+        const view = (b, extra = {}) => ({ name: b.name, online: b.online, lastSeen: b.lastSeen ? new Date(b.lastSeen).toISOString() : null, status: b.status, error: b.error || null, booster: { choice: store.choice(b.name), error: errs[b.name] || null }, newToday: stats.today(b.name), ...extra });
         let out;
         if (accounts) {
           const byName = new Map(list.map((b) => [b.name.toLowerCase(), b]));
@@ -108,6 +114,10 @@ function createApp(opts) {
           bots: out,
           alerts: tracker.apply(computeAlerts(list.filter((b) => b.online || b.lastSeen != null || accounts), now()), now()),
         });
+      }
+      if (req.method === 'GET' && p === '/api/stats') {
+        const days = Math.min(365, Math.max(7, parseInt(url.searchParams.get('days') || '30', 10) || 30));
+        return send(res, 200, stats.history(days, accounts ? accounts.list().map((a) => a.username) : bots.names()));
       }
       if (req.method === 'POST' && p === '/api/alerts/dismiss') {
         let body; try { body = JSON.parse(await readBody(req)); } catch (e) { if (e.status) throw e; return send(res, 400, { error: 'JSON invalide' }); }
@@ -251,7 +261,8 @@ function main() {
   }
   const store = createStore(path.join(dir, 'panel-state.json'));
   const reconciler = createReconciler({ store, push: (n, p) => bots.config(n, p) });
-  const app = createApp({ store, reconciler, accounts, fleet,
+  const stats = createStats(path.join(dir, 'stats.json'));
+  const app = createApp({ store, reconciler, accounts, fleet, stats,
     passwordHash: env.PANEL_PASSWORD_HASH, secret: env.PANEL_SECRET, bots,
     trustProxy: env.PANEL_TRUST_PROXY === '1', secureCookie: env.PANEL_INSECURE_COOKIE !== '1',
   });

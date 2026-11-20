@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Ouverture auto dès que l'énergie suffit
 // @namespace    kevin.holopocket
-// @version      3.3
+// @version      3.4
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-auto-booster.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-auto-booster.user.js
 // @description  Surveille l'énergie en arrière-plan. Dès qu'elle suffit (énergie bonus comprise), ouvre 1 booster de la série favorite qui a le plus de chance de donner une nouvelle carte (ou d'une série fixe, ou de la série la plus rentable en nouvelles cartes par point d'énergie, ou de la série qui fait avancer les quêtes du Tour des Arènes, selon le réglage du panel).
@@ -161,8 +161,17 @@
   const tell = (k, html, kind = 'info') => { if (eventTold.has(k)) return; eventTold.add(k); UI.toast(html, { kind, ms: 12000 }); };
   async function pickEvent(all, packs) {
     if (!CONFIG.EVENT_PROMO) return null;
-    if (Date.now() - eventCache.at > 5 * 60000) {
-      try { eventCache = { at: Date.now(), data: await api('GET', '/event') }; } catch { eventCache = { at: Date.now(), data: null }; }
+    // Relu toutes les 5 min, et tout de suite quand l'événement annoncé vient de commencer ou que l'événement en cours vient de finir :
+    // sans cela, le script restait jusqu'à 5 min sur l'ancienne réponse et dépensait ailleurs l'énergie gardée.
+    const cachedUp = eventCache.data && eventCache.data.upcoming, cachedEv = eventCache.data && eventCache.data.event;
+    const turned = (cachedUp && Date.parse(cachedUp.startsAt) <= Date.now() && eventCache.at < Date.parse(cachedUp.startsAt) + 60000)
+      || (cachedEv && Date.parse(cachedEv.endsAt) <= Date.now());
+    if (turned || Date.now() - eventCache.at > 5 * 60000) {
+      // À la bascule, le site peut mettre quelques secondes à publier l'événement : on relit au plus toutes les 20 s
+      if (!turned || Date.now() - (eventCache.triedAt || 0) > 20000) {
+        try { eventCache = { at: Date.now(), triedAt: Date.now(), data: await api('GET', '/event') }; }
+        catch { eventCache = { ...eventCache, triedAt: Date.now(), ...(turned ? {} : { at: Date.now(), data: null }) }; }
+      }
     }
     const ev = eventCache.data && eventCache.data.event, pr = (eventCache.data && eventCache.data.progress) || {};
     // Recharge : celle de l'événement si elle est accélérée, sinon celle du compte (écart entre « since » et « nextAt »), sinon 10 min
@@ -183,11 +192,17 @@
           // Énergie au départ si on ouvre encore un booster maintenant : en dessous de la réserve → on attend
           const atStart = Math.min(cap, usable(packs) - (state.lastCost || 1) + Math.floor(tts / everyOf({})));
           if (atStart < reserve) {
-            tell(`${up.name}|hold`, `<b>Événement ${esc(up.name)}</b> dans ${Math.ceil(tts / 60000)} min : l'énergie est gardée pour la promo (${up.promo.packs} boosters).`);
+            tell(`${up.name}|hold`, `<b>Événement ${esc(up.name)}</b> dans ${Math.ceil(tts / 60000)} min : l'énergie est gardée pour la promo (${up.promo.packs} booster${up.promo.packs > 1 ? 's' : ''} à ouvrir, ${up.promo.packs * cost} d'énergie).`);
             return { wait: true, reason: `énergie gardée pour l'événement ${up.name}` };
           }
         }
       }
+    }
+    // L'événement annoncé (avec promo) a commencé il y a moins de 10 min mais le site ne le donne pas encore comme en cours :
+    // on attend au lieu d'ouvrir autre chose avec l'énergie gardée
+    if (!ev && up && up.promo && up.promo.packs > 0) {
+      const since = Date.now() - Date.parse(up.startsAt);
+      if (since >= 0 && since < 10 * 60000 && Date.parse(up.endsAt) > Date.now()) return { wait: true, reason: `événement ${up.name} en cours de démarrage` };
     }
     const promo = ev && ev.promo;
     if (!ev || !promo || !(promo.packs > 0) || !Array.isArray(ev.setIds)) return null;

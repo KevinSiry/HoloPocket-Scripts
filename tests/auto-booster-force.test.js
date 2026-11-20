@@ -224,3 +224,9 @@ test('événement annoncé mais largement faisable sans réserve : ouverture nor
   const r = await run('setA', { sets, event: { event: null, progress: null, upcoming: up } });
   assert.deepStrictEqual(r.opened, ['setA']);
 });
+
+test('événement annoncé qui vient de commencer, pas encore publié par le site : on attend, on n’ouvre rien d’autre', async () => {
+  const up = { name: 'Bascule', startsAt: inH(-1 / 60), endsAt: inH(3), setIds: ['setB'], packPrice: null, promo: { packs: 1, max: 1 } };
+  const r = await run('setA', { sets: SETS.map((x) => ({ ...x, packCost: 1 })), event: { event: null, progress: null, upcoming: up } });
+  assert.deepStrictEqual(r.opened, []);
+});

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.30
+// @version      3.31
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-echanges.user.js
 // @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord (complétés par des paires de valeur équivalente quand il y en a peu), avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, et des pièces du compte une fois par heure, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
@@ -23,7 +23,7 @@
     TOL_ABS: 2,          // …ou 2 pièces, le plus large des deux (utile pour les petites cartes)
     SAME_RARITY: true,   // exige le même niveau de rareté des deux côtés de chaque paire
     SAME_VERSION: true,  // et la même version : reverse contre reverse, normale contre normale
-    BUY_WITH_COINS: true,    // places d'échange encore libres après la recherche : propose des pièces contre les doublons qui me manquent
+    BUY_WITH_COINS: false,   // true = propose aussi des pièces contre les doublons qui me manquent (coupé : le but est d'accumuler des pièces)
     BUY_RESERVE: 0,          // …pièces jamais engagées dans ces offres (0 = tout le solde peut servir)
     BUY_MAX_PER_TRADE: Infinity, // …pièces au plus par proposition (Infinity = pas de plafond)
     SELL_FOR_COINS: true,    // plus assez de pièces pour acheter : rôles inversés, mes doublons proposés contre des pièces, à leur valeur

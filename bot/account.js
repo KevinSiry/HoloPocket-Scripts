@@ -34,6 +34,26 @@ function lightPage() {
   const si = window.setInterval.bind(window);
   window.setInterval = (fn, ms, ...a) => si(fn, ms >= 1000 && ms <= 2000 ? ms * 5 : ms, ...a);
 }
+// Exécuté dans chaque page avant le site : note chaque message des scripts (toast) dès qu'il apparaît.
+// Les scripts n'en gardent que 3 à l'écran : une lecture de l'écran toutes les 10 s en perdait quand plusieurs arrivaient d'un coup
+// (par exemple six boosters ouverts à la suite).
+function watchToasts() {
+  window.__hpToasts = [];
+  const done = new WeakSet();
+  const take = (n) => {
+    if (done.has(n)) return;
+    done.add(n);
+    const text = (n.innerText || n.textContent || '').trim();
+    if (text && window.__hpToasts.length < 500) window.__hpToasts.push({ text, error: n.classList.contains('hp-toast--error') });
+  };
+  new MutationObserver((muts) => {
+    for (const m of muts) for (const n of m.addedNodes) {
+      if (n.nodeType !== 1) continue;
+      if (n.classList && n.classList.contains('hp-toast')) take(n);
+      else if (n.querySelectorAll) n.querySelectorAll('.hp-toast').forEach(take);
+    }
+  }).observe(document, { childList: true, subtree: true });
+}
 const list = (s) => (s || '').split(',').map((x) => x.trim()).filter(Boolean);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const BAD = /impossible|refusée|plantée|Arrêt|Erreur page|expirée|absente/i;
@@ -144,6 +164,7 @@ async function startAccount(opts) {
     if (cfg.cookie) await ctx.addCookies(parseCookie(cfg.cookie));
     const setLS = (t) => { try { for (const [k, v] of Object.entries(t)) localStorage.setItem(k, v); } catch {} };
     await ctx.addInitScript(setLS, cfg.toggles);
+    await ctx.addInitScript(watchToasts);
     if (cfg.light) {
       await ctx.addInitScript(lightPage);
       // Ni images, ni polices, ni médias : rien de tout cela ne sert aux scripts
@@ -212,6 +233,8 @@ async function startAccount(opts) {
     // Messages des scripts (toasts) recopiés dans le journal
     every(async () => {
       const t = await page.evaluate(() => {
+        // File remplie par watchToasts au moment où chaque message apparaît : aucun n'est perdu, même s'ils se chassent à l'écran
+        if (Array.isArray(window.__hpToasts)) { const q = window.__hpToasts; window.__hpToasts = []; return q; }
         window.__seen = window.__seen || new Set();
         return [...document.querySelectorAll('.hp-toast')]
           // innerText garde les retours à la ligne du message (titre, puis détail) ; textContent les collait

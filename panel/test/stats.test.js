@@ -30,3 +30,16 @@ test('le jour change à minuit heure de Paris, pas en UTC', () => {
   assert.strictEqual(s.today('a'), 3);
   assert.deepStrictEqual(s.history(2, ['a']).days, ['2026-11-19', '2026-11-20']);
 });
+
+test('changement de source du chiffre : l’historique est recalé, pas de faux gain', () => {
+  let t = D('2026-11-19T10:00:00Z');
+  const s = createStats(null, { now: () => t });
+  s.record('a', 100, 500, 'sets'); s.record('a', 104, 500, 'sets');
+  t = D('2026-11-20T10:00:00Z');
+  s.record('a', 106, 500, 'sets');           // +2 aujourd'hui
+  s.record('a', 255, null, 'profile');       // même instant, autre source (+149 d'écart)
+  assert.strictEqual(s.today('a'), 2);
+  s.record('a', 258, null, 'profile');
+  assert.strictEqual(s.today('a'), 5);
+  assert.deepStrictEqual(s.history(2, ['a']).bots.a.map((x) => x.gain), [4, 5]);
+});

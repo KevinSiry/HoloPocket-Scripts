@@ -30,9 +30,18 @@ function createStats(file, { now = Date.now } = {}) {
   return {
     dayOf,
     // owned : cartes différentes possédées ; total : cartes existantes
-    record(name, owned, total) {
+    record(name, owned, total, basis = 'sets') {
       if (typeof owned !== 'number' || !Number.isFinite(owned) || owned < 0) return;
       const bot = (data.bots[name] ||= { days: {} });
+      // La source du chiffre a changé (somme des séries → chiffre du profil) : l'historique est recalé sur la nouvelle base,
+      // sinon l'écart entre les deux sources passerait pour des cartes gagnées
+      if (bot.basis && bot.basis !== basis) {
+        const lastDay = Object.keys(bot.days).sort().pop();
+        const delta = lastDay ? owned - bot.days[lastDay].last : 0;
+        for (const d of Object.values(bot.days)) { d.first += delta; d.last += delta; }
+        dirty = true;
+      }
+      if (bot.basis !== basis) { bot.basis = basis; dirty = true; }
       const day = dayOf(now());
       const d = bot.days[day];
       if (!d) {

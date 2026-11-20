@@ -35,7 +35,17 @@ function readSiteState() {
   // La liste des séries (favoris, cartes possédées) : relue au plus toutes les 5 min
   const cached = window.__hpSets && Date.now() - window.__hpSets.at < 300000;
   return Promise.all([j('/me'), j('/trades/sent'), j('/market/counts'), cached ? window.__hpSets.v : j('/sets')])
-    .then(([me, sent, counts, sets]) => { if (!cached && sets) window.__hpSets = { at: Date.now(), v: sets }; return ({ me, sent, counts, sets, flip: ls('hp-flip-state'), beat: ls('hp-flip-beat'), lastPack: ls('hp-booster-last') }); });
+    .then(async ([me, sent, counts, sets]) => {
+      if (!cached && sets) window.__hpSets = { at: Date.now(), v: sets };
+      // Profil public du compte : c'est lui qui porte le nombre de « cartes différentes » affiché par le site (promos comprises). Relu au plus toutes les 5 min.
+      const name = me && me.me && me.me.username;
+      if (name && !(window.__hpProf && window.__hpProf.name === name && Date.now() - window.__hpProf.at < 300000)) {
+        const p = await j(`/users/${encodeURIComponent(name)}`);
+        if (p) window.__hpProf = { at: Date.now(), name, v: { uniqueCards: p.uniqueCards, totalCards: p.totalCards } };
+      }
+      const profile = name && window.__hpProf && window.__hpProf.name === name ? window.__hpProf.v : null;
+      return ({ me, sent, counts, sets, profile, flip: ls('hp-flip-state'), beat: ls('hp-flip-beat'), lastPack: ls('hp-booster-last') });
+    });
 }
 // Exécuté DANS la page : chance d'obtenir au moins une nouvelle carte en ouvrant un booster de chaque série (hors promos).
 // Même calcul que le script d'ouverture auto (une reverse manquante compte comme une nouvelle carte). Séries lues une par une.
@@ -97,10 +107,13 @@ function readSets() {
  *   name, startedAt,              identité du bot
  * }
  */
-function collectionOf(sets) {
+// Cartes différentes possédées. Source de référence : le chiffre du profil du site (« uniqueCards », promos comprises).
+// À défaut, la somme des séries, qui ignore les cartes promo. « basis » dit quelle source a servi.
+function collectionOf(sets, profile) {
+  if (profile && typeof profile.uniqueCards === 'number') return { owned: profile.uniqueCards, total: null, copies: typeof profile.totalCards === 'number' ? profile.totalCards : null, basis: 'profile' };
   const list = arr(sets).filter((s) => typeof s.owned === 'number' && typeof s.cardCount === 'number');
   if (!list.length) return null;
-  return { owned: list.reduce((t, s) => t + s.owned, 0), total: list.reduce((t, s) => t + s.cardCount, 0) };
+  return { owned: list.reduce((t, s) => t + s.owned, 0), total: list.reduce((t, s) => t + s.cardCount, 0), copies: null, basis: 'sets' };
 }
 
 function createGlue(deps) {
@@ -136,7 +149,7 @@ function createGlue(deps) {
         quarantined: !!me.quarantined,
       } : null,
       // Collection : cartes différentes possédées sur l'ensemble des séries (sert au compteur de nouvelles cartes du panel)
-      collection: collectionOf(d && d.sets),
+      collection: collectionOf(d && d.sets, d && d.profile),
       trades: { open, max: TRADES_MAX, fullSince: iso(watch.tradesFullSince) },
       sales: { selling: d && d.counts ? d.counts.selling ?? null : null, max: d && d.counts ? d.counts.maxSelling ?? null : null },
       scripts: pc.KNOWN_SCRIPTS.map((n) => {

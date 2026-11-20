@@ -360,7 +360,7 @@ async function accountCard(bot, globalChoice) {
   card.append(coins);
   if (s.collection) {
     const col = el('p', 'collection');
-    col.append(el('span', null, `Collection ${num(s.collection.owned)} sur ${num(s.collection.total)}`));
+    col.append(el('span', null, s.collection.total ? `Collection ${num(s.collection.owned)} sur ${num(s.collection.total)}` : `${num(s.collection.owned)} cartes différentes`));
     if (typeof bot.newToday === 'number') col.append(el('b', bot.newToday > 0 ? 'up' : null, `${signed(bot.newToday)} aujourd’hui`));
     card.append(col);
   }

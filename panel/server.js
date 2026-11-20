@@ -37,7 +37,7 @@ function createApp(opts) {
   const stats = opts.stats || createStats(null, { now });
   // Chaque lecture des bots alimente le suivi de collection (nouvelles cartes par jour)
   const refreshAll = () => inflight || (inflight = bots.refreshAll().then((list) => {
-    for (const b of list) { const c = b.online && b.status && b.status.collection; if (c) stats.record(b.name, c.owned, c.total); }
+    for (const b of list) { const c = b.online && b.status && b.status.collection; if (c) stats.record(b.name, c.owned, c.total, c.basis || 'sets'); }
     return list;
   }).finally(() => { inflight = null; }));
   const tracker = createAlertTracker();

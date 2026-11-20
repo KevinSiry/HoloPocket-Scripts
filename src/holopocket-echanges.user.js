@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Échanges équitables
 // @namespace    kevin.holopocket
-// @version      3.29
+// @version      3.30
 // @description  Échanges équitables : doublons contre doublons de même rareté et même version, raretés hautes d'abord (complétés par des paires de valeur équivalente quand il y en a peu), avec complément en pièces demandé à l'autre joueur si ta carte vaut plus (jamais l'inverse). Joueur prioritaire optionnel (don de toutes tes cartes qu'il n'a pas, et des pièces du compte une fois par heure, même en un seul exemplaire, sauf cartes en vente). Pour tous les autres échanges : jamais le dernier exemplaire d'une carte, jamais une carte en vente. Mode automatique possible.
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -25,7 +25,7 @@
     BUY_RESERVE: 0,          // …pièces jamais engagées dans ces offres (0 = tout le solde peut servir)
     BUY_MAX_PER_TRADE: Infinity, // …pièces au plus par proposition (Infinity = pas de plafond)
     SELL_FOR_COINS: true,    // plus assez de pièces pour acheter : rôles inversés, mes doublons proposés contre des pièces, à leur valeur
-    SELL_BELOW: 500,         // …et dès que le solde passe sous 500 pièces, la vente de doublons passe avant les achats
+    SELL_ALWAYS: true,       // …et en continu : tant qu'il reste des places, la moitié sert à vendre mes doublons, l'autre à acheter
     SELL_MAX_CARDS: 5,       // …cartes au plus par proposition
     BUY_MAX_CARDS: 5,        // …cartes au plus par proposition
     AUTO_DECLINE: true,      // mode auto : refuse les échanges reçus qui me prendraient une carte que je n'ai pas en double, ou m'en donneraient une que j'ai déjà
@@ -692,9 +692,9 @@
       const free = (c) => !proposals.some((pr) => pr.partner === c.partner) && !playerBlocked(c.partner, log);
 
       // a) J'achète : des pièces contre les doublons qui me manquent
-      const buyStep = async () => {
+      const buyStep = async (limit = target) => {
         for (const c of buyBacklog.filter(free)) {
-          if (proposals.length >= target || budget < 1) break;
+          if (proposals.length >= limit || budget < 1) break;
           const buys = [];
           let pay = 0;
           for (const a of c.ask) { // raretés hautes d'abord (ordre du scan)
@@ -712,10 +712,10 @@
         }
       };
       // b) Je vends : mes doublons contre des pièces (jamais le dernier exemplaire)
-      const sellStep = async () => {
+      const sellStep = async (limit = target) => {
         const spareOf = (g) => Math.min((g.copies ?? 2) - 1, g.userCardIds.length);
         for (const c of [...sellOnly, ...buyBacklog].filter(free)) {
-          if (proposals.length >= target) break;
+          if (proposals.length >= limit) break;
           // les cartes qu'il recherche d'abord, puis les plus chères
           const wished = (g) => (c.wish && c.wish.has(key(g)) ? 1 : 0);
           const gives = [];
@@ -736,15 +736,19 @@
 
       const buyOn = CONFIG.BUY_WITH_COINS && Date.now() >= lsNum(BUY_OFF_KEY);
       const sellOn = CONFIG.SELL_FOR_COINS && balance != null; // solde illisible : on ne vend pas à l'aveugle
-      // Solde sous le seuil : la vente passe d'abord, pour refaire des pièces
-      const low = sellOn && balance < CONFIG.SELL_BELOW;
-      if (low) await sellStep();
-      if (buyOn) await buyStep();
-      if (sellOn && !low && proposals.length < target) {
-        // Plus de quoi acheter la moins chère des cartes visées : vente aussi.
-        // Estimation rapide (valeurs des listes) : sert seulement à savoir s'il reste de quoi acheter, pas à fixer un prix
-        const prices = buyBacklog.filter(free).flatMap((c) => c.ask).filter((a) => !wantedTaken.has(key(a))).map((a) => Math.ceil(val(a))).filter((v) => v > 0);
-        if (budget < 1 || (prices.length > 0 && budget < Math.min(...prices))) await sellStep();
+      if (sellOn && CONFIG.SELL_ALWAYS) {
+        // Vente en continu : la moitié des places libres pour vendre, puis les achats, puis ce qui reste pour l'un ou l'autre
+        await sellStep(proposals.length + Math.ceil((target - proposals.length) / 2));
+        if (buyOn) await buyStep();
+        await sellStep();
+      } else {
+        if (buyOn) await buyStep();
+        if (sellOn && proposals.length < target) {
+          // Plus de quoi acheter la moins chère des cartes visées : vente.
+          // Estimation rapide (valeurs des listes) : sert seulement à savoir s'il reste de quoi acheter, pas à fixer un prix
+          const prices = buyBacklog.filter(free).flatMap((c) => c.ask).filter((a) => !wantedTaken.has(key(a))).map((a) => Math.ceil(val(a))).filter((v) => v > 0);
+          if (budget < 1 || (prices.length > 0 && budget < Math.min(...prices))) await sellStep();
+        }
       }
     }
     return proposals;

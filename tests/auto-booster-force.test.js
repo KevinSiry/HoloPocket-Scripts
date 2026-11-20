@@ -208,3 +208,19 @@ test('événement à plusieurs séries : celle qui a la meilleure chance de nouv
   const r = await run(undefined, { sets, detail: det, event: EVT({ setIds: ['setA', 'setC'] }) });
   assert.deepStrictEqual(r.opened, ['setC']);
 });
+
+test('événement annoncé : l’énergie est gardée quand la recharge pendant l’événement ne suffira pas', async () => {
+  // Événement d'1 h (6 d'énergie rechargée), promo à 10 boosters → il faut partir avec 4 + 2 de marge ; départ dans 10 min, stock 5
+  const up = { name: 'Bientôt', startsAt: inH(1 / 6), endsAt: inH(1 + 1 / 6), setIds: ['setB'], packPrice: null, promo: { packs: 10, max: 1 } };
+  const sets = SETS.map((x) => ({ ...x, packCost: 1 }));
+  const r = await run('setA', { sets, event: { event: null, progress: null, upcoming: up } });
+  assert.deepStrictEqual(r.opened, []);
+  assert(r.toasts.some((m) => /énergie est gardée/.test(m)), JSON.stringify(r.toasts));
+});
+
+test('événement annoncé mais largement faisable sans réserve : ouverture normale', async () => {
+  const up = { name: 'Bientôt', startsAt: inH(1), endsAt: inH(25), setIds: ['setB'], packPrice: null, promo: { packs: 10, max: 1 } };
+  const sets = SETS.map((x) => ({ ...x, packCost: 1 }));
+  const r = await run('setA', { sets, event: { event: null, progress: null, upcoming: up } });
+  assert.deepStrictEqual(r.opened, ['setA']);
+});

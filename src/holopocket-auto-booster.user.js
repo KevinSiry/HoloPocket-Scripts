@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Ouverture auto dès que l'énergie suffit
 // @namespace    kevin.holopocket
-// @version      3.2
+// @version      3.3
 // @description  Surveille l'énergie en arrière-plan. Dès qu'elle suffit (énergie bonus comprise), ouvre 1 booster de la série favorite qui a le plus de chance de donner une nouvelle carte (ou d'une série fixe, ou de la série la plus rentable en nouvelles cartes par point d'énergie, ou de la série qui fait avancer les quêtes du Tour des Arènes, selon le réglage du panel).
 // @match        https://holopocket.fr/*
 // @grant        none
@@ -163,6 +163,30 @@
       try { eventCache = { at: Date.now(), data: await api('GET', '/event') }; } catch { eventCache = { at: Date.now(), data: null }; }
     }
     const ev = eventCache.data && eventCache.data.event, pr = (eventCache.data && eventCache.data.progress) || {};
+    // Recharge : celle de l'événement si elle est accélérée, sinon celle du compte (écart entre « since » et « nextAt »), sinon 10 min
+    const own = (Date.parse(packs.nextAt) - Date.parse(packs.since)) / 60000;
+    const everyOf = (e) => (e.packIntervalMinutes || (own >= 1 && own <= 120 ? own : 10)) * 60000;
+    // Événement ANNONCÉ avec promo : si la recharge pendant l'événement ne suffit pas, on garde l'énergie qu'il faudra avoir au départ
+    const up = eventCache.data && eventCache.data.upcoming;
+    if (!(ev && ev.promo) && up && up.promo && up.promo.packs > 0 && Array.isArray(up.setIds)) {
+      const start = Date.parse(up.startsAt), end = Date.parse(up.endsAt), tts = start - Date.now();
+      const costs = all.filter((x) => up.setIds.includes(x.id)).map((x) => x.packCost).filter((n) => typeof n === 'number' && n > 0);
+      if (tts > 0 && end > start && costs.length) {
+        const every = everyOf(up), cost = up.packPrice ?? Math.min(...costs);
+        const short = up.promo.packs * cost - Math.floor((end - start) / every); // énergie qui manquera si on part de zéro
+        const cap = packs.max || 0;
+        if (short > cap) tell(`${up.name}|no`, `<b>Événement ${esc(up.name)}</b> (à venir) ignoré : ${up.promo.packs} boosters pour la promo, plus que ce que la recharge permet pendant sa durée.`);
+        else {
+          const reserve = Math.min(cap, Math.max(0, short) + 2); // 2 d'énergie de marge
+          // Énergie au départ si on ouvre encore un booster maintenant : en dessous de la réserve → on attend
+          const atStart = Math.min(cap, usable(packs) - (state.lastCost || 1) + Math.floor(tts / everyOf({})));
+          if (atStart < reserve) {
+            tell(`${up.name}|hold`, `<b>Événement ${esc(up.name)}</b> dans ${Math.ceil(tts / 60000)} min : l'énergie est gardée pour la promo (${up.promo.packs} boosters).`);
+            return { wait: true, reason: `énergie gardée pour l'événement ${up.name}` };
+          }
+        }
+      }
+    }
     const promo = ev && ev.promo;
     if (!ev || !promo || !(promo.packs > 0) || !Array.isArray(ev.setIds)) return null;
     const msLeft = Date.parse(ev.endsAt) - Date.now();
@@ -179,7 +203,7 @@
     // Faisable ? Boosters restants pour la PROCHAINE promo × coût, contre l'énergie disponible + celle rechargée avant la fin
     const need = Math.max(0, promo.packs - Math.max(0, (pr.packs || 0) - won * promo.packs));
     const cost = ev.packPrice ?? best.cost;
-    const every = (ev.packIntervalMinutes || packs.intervalMinutes || 10) * 60000;
+    const every = everyOf(ev);
     const energy = usable(packs) + Math.floor(msLeft / every);
     if (need * cost > energy) {
       tell(`${ev.name}|no`, `<b>Événement ${esc(ev.name)}</b> ignoré : il reste ${need} booster(s) à ouvrir pour la promo (${need * cost} d'énergie), plus que ce que la recharge permet avant la fin.`);

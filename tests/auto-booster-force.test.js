@@ -36,6 +36,7 @@ async function run(force, o = {}) {
       if (opts.method === 'POST' && p === '/packs/open') { opened.push(JSON.parse(opts.body).setId); return ok({ cards: o.cards || [], packs: { stock: 0, max: 5 } }); }
       if (p === '/me') return ok({ me: { packs: o.packs || { stock: 5, max: 5 } } });
       if (p === '/sets') return ok(sets);
+      if (p === '/event') return ok(o.event || {});
       if (p === '/tour-quests') return o.quests === 'error' ? { ok: false, status: 404, json: async () => ({}) } : o.quests === 'down' ? { ok: false, status: 502, json: async () => ({}) } : ok({ quests: o.quests || [] });
       let m = p.match(/^\/sets\/([^/]+)\/booster$/);
       if (m) return ok({ ...BOOSTER, cost: (o.costs || {})[m[1]] || 1 });
@@ -177,4 +178,33 @@ test('énergie bonus comptée une seule fois (stock la contient déjà)', async 
 test('quêtes : site des quêtes en panne → on attend au lieu d’ouvrir des nouvelles cartes', async () => {
   const r = await run(undefined, { mode: 'quests', quests: 'down' });
   assert.deepStrictEqual(r.opened, []);
+});
+
+// ───────── Événement avec promo offerte ─────────
+const inH = (h) => new Date(Date.now() + h * 3600000).toISOString();
+const EVT = (over = {}, progress = {}) => ({ event: { name: 'Fête', endsAt: inH(24), setIds: ['setB'], packPrice: null, promo: { packs: 3, max: 1 }, ...over }, progress: { packs: 0, promos: 0, ...progress } });
+
+test('événement avec promo : ses boosters passent avant la série fixe', async () => {
+  const r = await run('setA', { event: EVT() });
+  assert.deepStrictEqual(r.opened, ['setB']);
+  assert(r.toasts.some((m) => /Événement Fête/.test(m)), JSON.stringify(r.toasts));
+});
+
+test('événement : promo déjà gagnée, ou événement terminé → réglage habituel', async () => {
+  assert.deepStrictEqual((await run('setA', { event: EVT({}, { packs: 3, promos: 1 }) })).opened, ['setA']);
+  assert.deepStrictEqual((await run('setA', { event: EVT({ endsAt: inH(-1) }) })).opened, ['setA']);
+});
+
+test('événement infaisable avant la fin : ignoré, et signalé', async () => {
+  // 40 boosters à 1 d'énergie, 5 en stock, 1 h restante à +1 toutes les 10 min → 11 d'énergie au mieux
+  const r = await run('setA', { event: EVT({ endsAt: inH(1), promo: { packs: 40, max: 1 } }) });
+  assert.deepStrictEqual(r.opened, ['setA']);
+  assert(r.toasts.some((m) => /ignoré/.test(m)), JSON.stringify(r.toasts));
+});
+
+test('événement à plusieurs séries : celle qui a la meilleure chance de nouvelle carte', async () => {
+  const sets = [...SETS, { id: 'setC', name: 'Gamma', favorite: false, promo: false }];
+  const det = (id) => ({ cards: [{ rarity: 'C', copies: id === 'setC' ? 0 : 1 }] }); // seule C a une carte manquante
+  const r = await run(undefined, { sets, detail: det, event: EVT({ setIds: ['setA', 'setC'] }) });
+  assert.deepStrictEqual(r.opened, ['setC']);
 });

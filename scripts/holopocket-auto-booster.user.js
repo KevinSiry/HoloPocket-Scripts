@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HoloPocket – Ouverture auto dès que l'énergie suffit
 // @namespace    kevin.holopocket
-// @version      3.1
+// @version      3.2
 // @updateURL    https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-auto-booster.user.js
 // @downloadURL  https://raw.githubusercontent.com/KevinSiry/HoloPocket-Scripts/main/scripts/holopocket-auto-booster.user.js
 // @description  Surveille l'énergie en arrière-plan. Dès qu'elle suffit (énergie bonus comprise), ouvre 1 booster de la série favorite qui a le plus de chance de donner une nouvelle carte (ou d'une série fixe, ou de la série la plus rentable en nouvelles cartes par point d'énergie, ou de la série qui fait avancer les quêtes du Tour des Arènes, selon le réglage du panel).
@@ -15,6 +15,7 @@
 
   // ───────── Réglages ─────────
   const CONFIG = {
+    EVENT_PROMO: true,       // événement avec promo offerte : ses boosters passent avant tout autre réglage, s'il est faisable avant la fin
     COUNT_REVERSE: true,     // une reverse manquante compte comme une nouvelle carte
     KEEP_BONUS: false,       // false = l'énergie bonus sert aussi (true = seulement le stock qui se régénère)
     POLL_MS: 60000,          // fréquence de vérification de l'énergie (ms)
@@ -151,8 +152,49 @@
     return null;
   }
 
-  async function pickBestSet() {
+  // ───────── Événement avec promo offerte ─────────
+  // GET /event → { event: { name, endsAt, setIds, packPrice, packIntervalMinutes, promo: { packs, max } }, progress: { packs, promos } }
+  // Une promo est offerte tous les « promo.packs » boosters ouverts dans les séries de l'événement, « promo.max » fois au plus.
+  // Tant qu'une promo reste à gagner ET qu'elle est atteignable avant la fin, l'événement passe avant tout autre réglage.
+  let eventCache = { at: 0, data: null };
+  const eventTold = new Set(); // un message par événement et par situation
+  const tell = (k, html, kind = 'info') => { if (eventTold.has(k)) return; eventTold.add(k); UI.toast(html, { kind, ms: 12000 }); };
+  async function pickEvent(all, packs) {
+    if (!CONFIG.EVENT_PROMO) return null;
+    if (Date.now() - eventCache.at > 5 * 60000) {
+      try { eventCache = { at: Date.now(), data: await api('GET', '/event') }; } catch { eventCache = { at: Date.now(), data: null }; }
+    }
+    const ev = eventCache.data && eventCache.data.event, pr = (eventCache.data && eventCache.data.progress) || {};
+    const promo = ev && ev.promo;
+    if (!ev || !promo || !(promo.packs > 0) || !Array.isArray(ev.setIds)) return null;
+    const msLeft = Date.parse(ev.endsAt) - Date.now();
+    const won = pr.promos || 0;
+    if (!(msLeft > 0) || won >= (promo.max || 1)) return null; // fini, ou toutes les promos déjà gagnées
+    const sets = all.filter((s) => ev.setIds.includes(s.id) && !(skipUntil.get(s.id) > Date.now()));
+    if (!sets.length) return null;
+    // Série de l'événement avec la meilleure chance de nouvelle carte (à chance égale, la moins chère)
+    const rows = [];
+    for (const s of sets) { try { rows.push(await rowOf(s, 10 * 60000)); } catch {} }
+    if (!rows.length) return null;
+    rows.sort((a, b) => b.chance - a.chance || a.cost - b.cost);
+    const best = rows[0];
+    // Faisable ? Boosters restants pour la PROCHAINE promo × coût, contre l'énergie disponible + celle rechargée avant la fin
+    const need = Math.max(0, promo.packs - Math.max(0, (pr.packs || 0) - won * promo.packs));
+    const cost = ev.packPrice ?? best.cost;
+    const every = (ev.packIntervalMinutes || packs.intervalMinutes || 10) * 60000;
+    const energy = usable(packs) + Math.floor(msLeft / every);
+    if (need * cost > energy) {
+      tell(`${ev.name}|no`, `<b>Événement ${esc(ev.name)}</b> ignoré : il reste ${need} booster(s) à ouvrir pour la promo (${need * cost} d'énergie), plus que ce que la recharge permet avant la fin.`);
+      return null;
+    }
+    tell(`${ev.name}|go`, `<b>Événement ${esc(ev.name)}</b> : promo offerte dans ${need} booster(s), l'ouverture auto s'en occupe d'abord.`, 'success');
+    return { ...best, cost, event: true, reason: `événement ${ev.name} : promo dans ${need} booster(s)` };
+  }
+
+  async function pickBestSet(packs = {}) {
     const all = await api('GET', '/sets');
+    const evPick = await pickEvent(all, packs);
+    if (evPick) return evPick;
     const mode = boosterMode();
     if (mode === 'quests') {
       const q = await pickQuests(all);
@@ -232,10 +274,10 @@
 
       // Dès que l'énergie (bonus comprise) couvre le coût d'un booster, on ouvre
       // Le coût retenu vaut pour le choix du moment : il est oublié si la série imposée change, ou après 10 min
-      const choice = `${readLS('hp-booster-force')}|${readLS('hp-booster-default')}|${readLS('hp-booster-mode')}`;
+      const choice = `${readLS('hp-booster-force')}|${readLS('hp-booster-default')}|${readLS('hp-booster-mode')}|${(eventCache.data && eventCache.data.event && eventCache.data.event.name) || ''}`;
       if (choice !== state.costFor || Date.now() - (state.costAt || 0) > 600000) { state.lastCost = 0; state.costFor = choice; state.costAt = Date.now(); }
       while (state.on && packs.stock != null && usable(packs) >= (state.lastCost || 1) && state.opens < CONFIG.MAX_OPENS) {
-        const best = await pickBestSet();
+        const best = await pickBestSet(packs);
         if (!best) { stop('Aucune série en favori (et aucun booster par défaut).'); return; }
         if (best.wait) break; // quête en cours mais pas jouable maintenant : on attend le prochain passage
         state.lastCost = best.cost;
@@ -244,12 +286,13 @@
         try { res = await openOne(best); }
         catch (e) {
           // Série refusée : écartée 1 h. Pour une quête, seulement après 3 refus de suite (un refus passager ne doit pas faire changer de cible)
-          if (best.optimal) skipUntil.set(best.id, Date.now() + 3600000);
+          if (best.optimal || best.event) skipUntil.set(best.id, Date.now() + 3600000);
           if (best.quest) { const n = (questFails.get(best.id) || 0) + 1; questFails.set(best.id, n); if (n >= 3) { questFails.delete(best.id); skipUntil.set(best.id, Date.now() + 3600000); } }
           throw e;
         }
         questFails.delete(best.id);
         chanceCache.delete(best.id); // la collection de cette série vient de changer
+        if (best.event) eventCache.at = 0; // progression de l'événement à relire
         state.opens++;
         state.lastSet = best;
         state.lastCards = describeCards(res.cards || [], best.owned);
